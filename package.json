@@ -1,0 +1,36 @@
+{
+  "name": "the-good-five",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The Good Five \u2014 five good things, every day.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "draft": "node --env-file-if-exists=.env.local server/cli.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "fast-xml-parser": "^5.12.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^6.30.6"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^6.1.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
+  }
+}

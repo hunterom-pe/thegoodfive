@@ -1,0 +1,50 @@
+import { Link, useParams } from 'react-router-dom'
+import { EditionView } from '../components/EditionView'
+import { PageLoading, PageMessage } from '../components/PageStates'
+import { SiteFooter } from '../components/SiteFooter'
+import { SiteHeader } from '../components/SiteHeader'
+import { StoryProgress } from '../components/StoryProgress'
+import { publicRepo } from '../data/publicRepo'
+import { formatLong, isISODate, todayISO } from '../lib/dates'
+import { useAsync, useTitle } from '../lib/hooks'
+
+export function EditionPage() {
+  const { date = '' } = useParams()
+  const valid = isISODate(date)
+  const [state, retry] = useAsync(() => (valid ? publicRepo.byDate(date) : Promise.resolve(null)), `edition:${date}`)
+  const edition = state.status === 'ready' ? state.data : null
+  useTitle(valid ? formatLong(date) : 'Edition not found')
+
+  const back = (
+    <Link to="/archive" className="btn">
+      Browse the archive
+    </Link>
+  )
+  return (
+    <>
+      <SiteHeader progress={edition ? <StoryProgress count={edition.stories.length} /> : null} />
+      <main>
+        {state.status === 'loading' && <PageLoading label="Opening the archive…" />}
+        {state.status === 'error' && (
+          <PageMessage
+            title="We couldn’t open that edition."
+            action={
+              <button type="button" className="btn btn-solid" onClick={retry}>
+                Try again
+              </button>
+            }
+          />
+        )}
+        {state.status === 'ready' &&
+          (edition ? (
+            <EditionView edition={edition} context={edition.date === todayISO() ? 'today' : 'archive'} />
+          ) : (
+            <PageMessage title="There’s no edition for that date." action={back}>
+              Either we didn’t publish that day, or the date isn’t quite right.
+            </PageMessage>
+          ))}
+      </main>
+      <SiteFooter />
+    </>
+  )
+}
