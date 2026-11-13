@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AiClient } from './ai.ts'
+import { openAiClient, type AiClient } from './ai.ts'
 import { allowedByRobots } from './article.ts'
 import { assemble, rank, ungroundedNumbers, ungroundedQuotes, type Shortlisted } from './curate.ts'
 import { dedupe, normalizeUrl, titleSimilarity, withinWindow } from './dedupe.ts'
@@ -117,6 +117,25 @@ describe('screening pool', () => {
     const pool = interleave([...big, ...small], 20)
     expect(pool).toHaveLength(20)
     expect(pool.filter((c) => c.via === 'RSS: Small')).toHaveLength(5)
+  })
+})
+
+describe('AI client provider compatibility', () => {
+  it('falls back to plain JSON mode when a provider rejects strict schemas, and unwraps code fences', async () => {
+    const real = globalThis.fetch
+    const bodies: { response_format: { type: string }; messages: { content: string }[] }[] = []
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      expect(url).toBe('https://free.example/v1/chat/completions')
+      const body = JSON.parse(String(init.body))
+      bodies.push(body)
+      if (body.response_format.type === 'json_schema') return new Response('{"error":"unsupported"}', { status: 400 })
+      return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '```json\n{"ok":true}\n```' } }] }))
+    }) as unknown as typeof fetch
+    const out = await openAiClient('k', 'm', 'https://free.example/v1/').json<{ ok: boolean }>({ system: 'S', user: 'U', name: 'n', schema: { type: 'object' }, maxTokens: 10 })
+    globalThis.fetch = real
+    expect(out).toEqual({ ok: true })
+    expect(bodies.map((b) => b.response_format.type)).toEqual(['json_schema', 'json_object'])
+    expect(bodies[1].messages[0].content).toMatch(/JSON Schema/)
   })
 })
 

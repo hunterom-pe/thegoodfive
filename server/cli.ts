@@ -17,7 +17,7 @@ if (!c.openAiKey) {
   process.exit(1)
 }
 const date = editionToday()
-console.log(`Edition date: ${date} (${c.timezone}) · model: ${c.model}\n`)
+console.log(`Edition date: ${date} (${c.timezone}) · model: ${c.model} · ${new URL(c.aiBaseUrl).host}\n`)
 
 if (save) {
   if (!c.supabaseUrl || !c.serviceKey) {
@@ -35,7 +35,7 @@ if (save) {
   console.log('\nResult:', data)
   process.exit(data?.status === 'succeeded' ? 0 : 1)
 } else {
-  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model), today: date, log: console.log })
+  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl), today: date, log: console.log })
   console.log('\nStats:', stats)
   for (const s of stories) {
     console.log(`\n[${s.role} ${s.position}] ${s.category.toUpperCase()}  ${s.headline}\n  ${s.source_name} · ${s.source_published_at?.slice(0, 10) ?? 'date unknown'} · ${s.source_url}\n  ${s.summary}\n  why: ${s.ai_rationale}\n  check: ${s.claims_to_check.join(' | ')}`)
