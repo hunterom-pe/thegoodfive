@@ -33,6 +33,10 @@ export function openAiClient(apiKey: string, model: string): AiClient {
           }),
           signal: AbortSignal.timeout(150_000),
         })
+        if (res.status === 429) {
+          const detail = await res.clone().text()
+          if (detail.includes('insufficient_quota')) throw new Error('The OpenAI account has no credits. Add billing credit at platform.openai.com/settings/organization/billing, then try again.')
+        }
         // One retry on rate limits and server errors; nothing else is worth repeating (and spending on).
         if ((res.status === 429 || res.status >= 500) && attempt === 0) {
           await sleep(5_000)
