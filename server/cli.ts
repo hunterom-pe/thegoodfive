@@ -10,6 +10,11 @@ import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
 import { admin, editionToday, env, executeRun, startRun } from './store.ts'
 
+process.on('uncaughtException', (e) => {
+  console.error(`\nFailed: ${e instanceof Error ? (e.name === 'TimeoutError' ? 'the AI provider took too long to answer (150 s limit). Try a faster model.' : e.message) : e}`)
+  process.exit(1)
+})
+
 const save = process.argv.includes('--save')
 const c = env()
 if (!c.openAiKey) {
