@@ -12,11 +12,11 @@ export function EditionClosing({ edition, context }: { edition: PublicEdition; c
   return (
     <section aria-label="End of edition" className="bg-forest text-chalk">
       <div className={`${wrap} pb-8 pt-20 lg:pb-10 lg:pt-36`}>
-        <Reveal>
+        <Reveal variant="closing">
           <FiveSquares onDark size={14} gap={7} />
-          <p className="label mt-10 text-sage">{kicker}</p>
-          <h2 className="display mt-5 max-w-[9em] text-[3.25rem] !leading-[0.98] !text-chalk sm:text-7xl lg:text-[7rem]">See? Good things are happening.</h2>
-          <p className="display display-wonk mt-6 text-[1.625rem] !leading-[1.15] !text-blush sm:text-4xl lg:mt-8 lg:text-[2.75rem]">
+          <p data-c="1" className="label mt-10 text-sage">{kicker}</p>
+          <h2 data-c="2" className="display mt-5 max-w-[9em] text-[3.25rem] !leading-[0.98] !text-chalk sm:text-7xl lg:text-[7rem]">See? Good things are happening.</h2>
+          <p data-c="3" className="display display-wonk mt-6 text-[1.625rem] !leading-[1.15] !text-blush sm:text-4xl lg:mt-8 lg:text-[2.75rem]">
             {context === 'archive' ? (
               <>
                 There are five more waiting.{' '}

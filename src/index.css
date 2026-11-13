@@ -144,15 +144,77 @@
   }
 }
 
-/* Scroll reveal — a short rise, nothing more. Skipped entirely for
-   visitors who prefer reduced motion. */
+/* ── Scroll reveals ────────────────────────────────────────────────────
+   Opacity and transform only, one shot per element, 300–600ms, no bounce.
+   Everything is gated on `rv-on` (set by Reveal.tsx once it has mounted) and on
+   no-preference, so content is plain and visible if scripts fail or if the
+   visitor prefers reduced motion. Markup: <Reveal variant="text|media|closing">. */
+:root {
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .reveal {
+  /* text: label, headline, summary, source follow one another */
+  .rv-on .rv-text > * {
     opacity: 0;
-    transform: translateY(14px);
-    transition: opacity 700ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+    transform: translate3d(0, 16px, 0);
+    transition: opacity 480ms var(--ease-out), transform 480ms var(--ease-out);
   }
-  .reveal.is-visible {
+  .rv-on .rv-text > :nth-child(2) { transition-delay: 90ms; }
+  .rv-on .rv-text > :nth-child(3) { transition-delay: 180ms; }
+  .rv-on .rv-text > :nth-child(n + 4) { transition-delay: 270ms; }
+  .rv-on .rv-text.is-visible > * {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* media: photograph fades in from a hair larger; squares drift in after it */
+  .rv-on .rv-media img {
+    transition: opacity 560ms var(--ease-out), transform 900ms var(--ease-out);
+  }
+  .rv-on .rv-media:not(.is-visible) img,
+  .rv-on .rv-media img:not(.is-loaded) {
+    opacity: 0;
+    transform: scale(1.025);
+  }
+  .rv-on .rv-media [data-sq] {
+    --sx: 0px;
+    --sy: 12px;
+    opacity: 0;
+    transform: translate3d(var(--sx), var(--sy), 0);
+    transition: opacity 520ms var(--ease-out) var(--d, 300ms), transform 640ms var(--ease-out) var(--d, 300ms);
+  }
+  .rv-on .rv-media.is-visible [data-sq] {
+    opacity: 1;
+    transform: none;
+  }
+  [data-sq='0'] { --d: 80ms; }
+  [data-sq='1'] { --d: 280ms; }
+  [data-sq='2'] { --d: 400ms; }
+  .rv-on .rv-media [data-sq][data-from='left'] { --sx: -14px; --sy: 0px; }
+  .rv-on .rv-media [data-sq][data-from='right'] { --sx: 14px; --sy: 0px; }
+  .rv-on .rv-media [data-sq][data-from='top'] { --sx: 0px; --sy: -12px; }
+
+  /* closing: five squares in turn, then the line, then its answer */
+  .rv-on .rv-closing [data-five] > span {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+    transition: opacity 420ms var(--ease-out), transform 520ms var(--ease-out);
+  }
+  .rv-on .rv-closing [data-five] > span:nth-child(2) { transition-delay: 90ms; }
+  .rv-on .rv-closing [data-five] > span:nth-child(3) { transition-delay: 180ms; }
+  .rv-on .rv-closing [data-five] > span:nth-child(4) { transition-delay: 270ms; }
+  .rv-on .rv-closing [data-five] > span:nth-child(5) { transition-delay: 360ms; }
+  .rv-on .rv-closing [data-c] {
+    opacity: 0;
+    transform: translate3d(0, 20px, 0);
+    transition: opacity 600ms var(--ease-out), transform 700ms var(--ease-out);
+  }
+  .rv-on .rv-closing [data-c='1'] { transition-delay: 460ms; }
+  .rv-on .rv-closing [data-c='2'] { transition-delay: 560ms; }
+  .rv-on .rv-closing [data-c='3'] { transition-delay: 780ms; }
+  .rv-on .rv-closing.is-visible [data-five] > span,
+  .rv-on .rv-closing.is-visible [data-c] {
     opacity: 1;
     transform: none;
   }

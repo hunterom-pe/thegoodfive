@@ -24,7 +24,7 @@ const DARK = ['bg-chalk', 'bg-sage', 'bg-blush', 'bg-[#b8977e]', 'bg-chalk']
 /** Five small squares in a row: the daily five, as a signature. */
 export function FiveSquares({ size = 10, gap = 5, onDark = false, className = '' }: { size?: number; gap?: number; onDark?: boolean; className?: string }) {
   return (
-    <span aria-hidden="true" className={`inline-flex ${className}`} style={{ gap }}>
+    <span aria-hidden="true" data-five className={`inline-flex ${className}`} style={{ gap }}>
       {(onDark ? DARK : LIGHT).map((color, i) => (
         <span key={i} className={color} style={{ width: size, height: size }} />
       ))}

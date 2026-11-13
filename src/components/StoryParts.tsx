@@ -83,6 +83,7 @@ export function StoryFigure({
   className?: string
 }) {
   const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const showPhoto = story.imageUrl && !failed
   return (
     <div className={`relative overflow-hidden bg-mist ${ratio} ${className}`}>
@@ -95,8 +96,12 @@ export function StoryFigure({
           loading={eager ? 'eager' : 'lazy'}
           fetchPriority={eager ? 'high' : undefined}
           decoding="async"
+          ref={(img) => {
+            if (img?.complete && img.naturalWidth > 0) setLoaded(true) // already cached
+          }}
+          onLoad={() => setLoaded(true)}
           onError={() => setFailed(true)}
-          className="absolute inset-0 size-full object-cover"
+          className={`absolute inset-0 size-full object-cover ${loaded ? 'is-loaded' : ''}`}
         />
       ) : (
         <StoryArt category={story.category} />
