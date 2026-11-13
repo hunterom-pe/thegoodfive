@@ -1,19 +1,18 @@
+import { LOGO_PATH, LOGO_VIEWBOX } from './logoPath'
+
 /** Shared page gutter and measure. Mobile first: 20px gutters at 390px. */
 export const wrap = 'mx-auto w-full max-w-[72rem] px-5 sm:px-8 lg:px-12'
 
 /**
- * The mark: five squares set like the five on a die. Four hold the corners,
- * one blush square sits in the middle — the small good thing at the centre.
+ * The mark: a single Fraunces Bold "G", drawn as a vector outline (see
+ * logoPath.ts) so it never waits for the font. It carries its own off-white
+ * square, matching the favicon and app icons.
  */
-export function BrandMark({ size = 22, onDark = false, className = '' }: { size?: number; onDark?: boolean; className?: string }) {
-  const corner = onDark ? '#FAFAF7' : '#304D3C'
+export function BrandMark({ size = 26, className = '' }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className={className}>
-      <rect x="0" y="0" width="8" height="8" fill={corner} />
-      <rect x="16" y="0" width="8" height="8" fill={corner} />
-      <rect x="8" y="8" width="8" height="8" fill="#EBC9CC" />
-      <rect x="0" y="16" width="8" height="8" fill={corner} />
-      <rect x="16" y="16" width="8" height="8" fill={corner} />
+    <svg width={size} height={size} viewBox={`0 0 ${LOGO_VIEWBOX} ${LOGO_VIEWBOX}`} aria-hidden="true" className={`shrink-0 ${className}`}>
+      <rect width={LOGO_VIEWBOX} height={LOGO_VIEWBOX} fill="#FAFAF7" />
+      <path d={LOGO_PATH} fill="#304D3C" />
     </svg>
   )
 }
