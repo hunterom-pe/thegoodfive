@@ -83,7 +83,7 @@ export function rank(candidates: Candidate[], evaluations: Evaluation[], now: nu
 
 const WRITE_SYSTEM = `You are the editor of The Good Five, a daily publication of five genuinely good news stories. Tone: warm, intelligent, grounded, optimistic without gushing. Journalistic, never clickbait, never generic AI phrasing.
 
-You receive up to 14 shortlisted stories, each with SOURCE MATERIAL retrieved from the publisher. Choose the best five (primary) and up to three backups (backup), then write each one.
+You receive up to 14 shortlisted stories, each with SOURCE MATERIAL retrieved from the publisher. Choose the best five (primary) and three backups (backup), then write each one. When at least eight stories are usable you MUST return exactly eight: five primary and three backup.
 
 Selection: genuine positive impact, credibility, significance, freshness and variety of subject. Prefer meaningful progress over trivial or viral items. Do not force category quotas, but do not run five stories on the same kind of news if equally strong alternatives exist. If fewer than eight stories qualify, return only those that do (primary first); never pad the list. If the source material is too thin to summarise accurately, leave the story out.
 
@@ -229,7 +229,10 @@ export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log:
   // Five primaries at most, three backups at most, in the model's order.
   const primaries = accepted.filter((a) => a.story.role === 'primary').slice(0, 5)
   const overflow = accepted.filter((a) => !primaries.includes(a) && a.story.role === 'primary')
-  const backups = [...accepted.filter((a) => a.story.role === 'backup'), ...overflow].slice(0, 3)
+  const queued = [...accepted.filter((a) => a.story.role === 'backup'), ...overflow]
+  // If the model (or a failed check) left the five short, the best backups step up so the edition is whole.
+  while (primaries.length < 5 && queued.length > 0) primaries.push(queued.shift()!)
+  const backups = queued.slice(0, 3)
 
   const toDraft = (a: (typeof accepted)[number], role: 'primary' | 'backup', position: number): DraftStory => ({
     role,

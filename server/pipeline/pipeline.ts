@@ -111,7 +111,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   }
 
   // 2. Screen on headline and excerpt (one AI call).
+  log('Screening candidates with AI…')
+  const t0 = Date.now()
   const evaluations = await screen(options.ai, pool, options.today)
+  log(`Screening took ${Math.round((Date.now() - t0) / 1000)}s`)
   const ranked = rank(pool, evaluations, now, SHORTLIST_SIZE)
   stats.qualified = evaluations.filter((e) => e.isGoodNews).length
   stats.shortlisted = ranked.length
@@ -126,7 +129,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   if (shortlist.length === 0) return { stories: [], stats }
 
   // 4. Choose and write (one AI call), then verify the writing against the source text.
+  log('Writing the edition with AI…')
+  const t1 = Date.now()
   const written = await write(options.ai, shortlist, options.today)
+  log(`Writing took ${Math.round((Date.now() - t1) / 1000)}s`)
   const stories = assemble(written, shortlist, log)
   stats.primary = stories.filter((s) => s.role === 'primary').length
   stats.backup = stories.filter((s) => s.role === 'backup').length

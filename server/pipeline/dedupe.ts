@@ -1,6 +1,18 @@
 import type { Candidate } from './types.ts'
 
-const TRACKING = /^(utm_|fbclid|gclid|mc_|at_|ref$|source$|cmp$|ito$|ocid$)/i
+const TRACKING = /^(utm_|fbclid|gclid|mc_|at_|amp;|ref$|source$|cmp$|ito$|ocid$|cid$|rss$)/i
+
+/** The article's own link with tracking parameters and fragments removed. Safe to show readers. */
+export function stripTracking(url: string): string {
+  try {
+    const u = new URL(url.trim())
+    for (const key of [...u.searchParams.keys()]) if (TRACKING.test(key)) u.searchParams.delete(key)
+    u.hash = ''
+    return u.toString()
+  } catch {
+    return url.trim()
+  }
+}
 
 /** Same article, different tracking link → same key. */
 export function normalizeUrl(url: string): string {

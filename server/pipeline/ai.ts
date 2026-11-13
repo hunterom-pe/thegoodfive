@@ -25,13 +25,21 @@ const parseJson = <T>(text: string): T => JSON.parse(text.trim().replace(/^```(?
  * with the schema spelled out in the prompt. Our own checks validate the
  * result either way.
  */
-export function openAiClient(apiKey: string, model: string, baseUrl = 'https://api.openai.com/v1'): AiClient {
+export interface AiOptions {
+  /** "low" or "none" makes thinking models (Gemini, o-series) answer much faster. Only sent when set. */
+  reasoningEffort?: string
+  timeoutSeconds?: number
+  /** Told about retries and fallbacks, so slow runs are explainable. */
+  log?: (line: string) => void
+}
+
+export function openAiClient(apiKey: string, model: string, baseUrl = 'https://api.openai.com/v1', options: AiOptions = {}): AiClient {
   const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`
   return {
     async json<T>(request: JsonRequest): Promise<T> {
       let strict = true
-      let retried = false
-      for (let attempt = 0; attempt < 4; attempt++) {
+      let retries = 0
+      for (let attempt = 0; attempt < 6; attempt++) {
         const system = strict ? request.system : `${request.system}\n\nReply with a single JSON object that matches this JSON Schema, and nothing else:\n${JSON.stringify(request.schema)}`
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -44,10 +52,12 @@ export function openAiClient(apiKey: string, model: string, baseUrl = 'https://a
             ],
             response_format: strict ? { type: 'json_schema', json_schema: { name: request.name, strict: true, schema: request.schema } } : { type: 'json_object' },
             max_completion_tokens: request.maxTokens,
+            ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
           }),
-          signal: AbortSignal.timeout(150_000),
+          signal: AbortSignal.timeout((options.timeoutSeconds ?? 240) * 1000),
         })
         if (res.status === 400 && strict) {
+          options.log?.('AI provider rejected strict JSON schema; retrying in plain JSON mode')
           strict = false // this provider doesn't take strict schemas: try plain JSON mode
           continue
         }
@@ -55,10 +65,12 @@ export function openAiClient(apiKey: string, model: string, baseUrl = 'https://a
           const detail = await res.clone().text()
           if (detail.includes('insufficient_quota')) throw new Error('The AI account has no credits. Add billing credit, or point OPENAI_BASE_URL at a free provider.')
         }
-        // One retry on rate limits and server errors; nothing else is worth repeating (and spending on).
-        if ((res.status === 429 || res.status >= 500) && !retried) {
-          retried = true
-          await sleep(res.status === 429 ? 15_000 : 5_000)
+        // Rate limits and overloaded servers are usually brief: wait and retry a few times (5s, 20s, 60s).
+        // Nothing else is worth repeating, or paying for.
+        if ((res.status === 429 || res.status >= 500) && retries < 3) {
+          const wait = [5_000, 20_000, 60_000][retries++]
+          options.log?.(`AI provider busy (HTTP ${res.status}); retry ${retries}/3 in ${wait / 1000}s`)
+          await sleep(wait)
           continue
         }
         if (res.status === 401 || res.status === 403) throw new Error('The AI provider rejected the API key. Check OPENAI_API_KEY.')

@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser'
 import type { Feed } from './feeds.ts'
-import { stripHtml, truncate } from './text.ts'
+import { stripTracking } from './dedupe.ts'
+import { decodeEntities, stripHtml, truncate } from './text.ts'
 import type { Candidate } from './types.ts'
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text', processEntities: false })
@@ -45,7 +46,7 @@ export function parseFeed(xml: string, feed: Feed): Candidate[] {
   ]
 
   return raw
-    .map((item) => ({ ...item, title: stripHtml(item.title), url: item.url.trim() }))
+    .map((item) => ({ ...item, title: stripHtml(item.title), url: stripTracking(decodeEntities(item.url)) }))
     .filter((item) => item.title && /^https?:\/\//i.test(item.url))
     .map((item) => ({
       id: '',

@@ -11,7 +11,7 @@ import { runPipeline } from './pipeline/pipeline.ts'
 import { admin, editionToday, env, executeRun, startRun } from './store.ts'
 
 process.on('uncaughtException', (e) => {
-  console.error(`\nFailed: ${e instanceof Error ? (e.name === 'TimeoutError' ? 'the AI provider took too long to answer (150 s limit). Try a faster model.' : e.message) : e}`)
+  console.error(`\nFailed: ${e instanceof Error ? (e.name === 'TimeoutError' ? 'the AI provider took too long to answer. Set AI_REASONING_EFFORT=low or AI_TIMEOUT_SECONDS higher, or use a faster model.' : e.message) : e}`)
   process.exit(1)
 })
 
@@ -40,7 +40,7 @@ if (save) {
   console.log('\nResult:', data)
   process.exit(data?.status === 'succeeded' ? 0 : 1)
 } else {
-  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl), today: date, log: console.log })
+  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, log: console.log })
   console.log('\nStats:', stats)
   for (const s of stories) {
     console.log(`\n[${s.role} ${s.position}] ${s.category.toUpperCase()}  ${s.headline}\n  ${s.source_name} · ${s.source_published_at?.slice(0, 10) ?? 'date unknown'} · ${s.source_url}\n  ${s.summary}\n  why: ${s.ai_rationale}\n  check: ${s.claims_to_check.join(' | ')}`)

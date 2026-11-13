@@ -25,6 +25,10 @@ describe('feeds', () => {
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ title: 'Good & useful', sourceName: 'Test', publishedAt: '2026-11-12T08:00:00.000Z', excerpt: 'Body text', trust: 3 })
   })
+  it('cleans entity-escaped, tracked article links', () => {
+    const xml = `<rss><channel><item><title>T</title><link>https://www.bbc.co.uk/news/articles/abc?at_medium=RSS&amp;at_campaign=rss</link></item></channel></rss>`
+    expect(parseFeed(xml, { name: 'BBC', url: 'u', trust: 3 })[0].url).toBe('https://www.bbc.co.uk/news/articles/abc')
+  })
   it('parses Atom', () => {
     const xml = `<feed><entry><title>Atom story</title><link rel="alternate" href="https://ex.org/atom"/><published>2026-11-12T08:00:00Z</published><summary>S</summary></entry></feed>`
     expect(parseFeed(xml, { name: 'A', url: 'u', trust: 2 })[0].url).toBe('https://ex.org/atom')
@@ -87,6 +91,13 @@ describe('assembly', () => {
     expect(out.filter((s) => s.role === 'primary')).toHaveLength(5)
     expect(out.filter((s) => s.role === 'backup')).toHaveLength(3)
     expect(new Set(out.map((s) => s.source_url)).size).toBe(out.length)
+  })
+  it('promotes backups into any empty primary slot so the five are whole', () => {
+    const written = [...[1, 2, 3, 4].map((n) => w(`c${n}`, 'primary')), ...[5, 6, 7].map((n) => w(`c${n}`, 'backup'))]
+    const out = assemble(written, shortlist)
+    expect(out.filter((s) => s.role === 'primary')).toHaveLength(5)
+    expect(out.filter((s) => s.role === 'backup')).toHaveLength(2)
+    expect(out[4]).toMatchObject({ role: 'primary', position: 5, source_url: 'https://example.org/5' })
   })
   it('excludes stories with an invented quotation and flags invented figures', () => {
     const written = [w('c1', 'primary', { summary: `${words(70)} “a quote nobody ever said”` }), w('c2', 'primary', { summary: `${words(70)} 999 people` })]

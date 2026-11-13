@@ -10,6 +10,8 @@ export function env() {
     serviceKey: e.SUPABASE_SERVICE_ROLE_KEY || '',
     openAiKey: e.OPENAI_API_KEY || '',
     model: e.OPENAI_MODEL || 'gpt-4.1-mini',
+    reasoningEffort: e.AI_REASONING_EFFORT || undefined,
+    aiTimeoutSeconds: Number(e.AI_TIMEOUT_SECONDS || 240),
     aiBaseUrl: e.OPENAI_BASE_URL || 'https://api.openai.com/v1',
     secret: e.GENERATION_SECRET || '',
     timezone: e.EDITION_TIMEZONE || e.VITE_EDITION_TIMEZONE || 'America/Phoenix',
@@ -79,7 +81,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const { data: recent } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
 
-    const result = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl), today: date, recentUrls, log })
+    const result = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log })
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) return await finish(db, runId, 'skipped', stats, 'No suitable stories were found. Nothing was saved.')
 
