@@ -4,6 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # The anon key is public by design and is bundled into the site, so exempt it
+  # from Netlify's secret scanner. Real secrets must never be listed here.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_ANON_KEY"
 
 # Single-page app: every route is served by index.html.
 [[redirects]]
