@@ -57,11 +57,13 @@ export interface AiConfig {
 export function aiConfig(e: NodeJS.ProcessEnv): AiConfig {
   const gemini = (e.GEMINI_API_KEY ?? '').trim()
   const legacy = (e.OPENAI_API_KEY ?? '').trim()
-  const baseUrl = (e.OPENAI_BASE_URL || (gemini ? GEMINI_COMPAT : 'https://api.openai.com/v1')).replace(/\/$/, '')
+  // A Gemini key ALWAYS means Google's official endpoint and GEMINI_MODEL: a leftover OPENAI_BASE_URL / OPENAI_MODEL must never redirect it.
+  // The legacy OPENAI_* settings apply only when there is no GEMINI_API_KEY.
+  const baseUrl = gemini ? GEMINI_COMPAT : (e.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '')
   return {
     provider: baseUrl.includes('generativelanguage.googleapis.com') ? 'gemini' : 'openai-compatible',
     key: normaliseKey(gemini || legacy),
-    model: (e.GEMINI_MODEL || e.OPENAI_MODEL || (gemini ? DEFAULT_GEMINI_MODEL : 'gpt-4.1-mini')).trim(),
+    model: (gemini ? e.GEMINI_MODEL || DEFAULT_GEMINI_MODEL : e.OPENAI_MODEL || e.GEMINI_MODEL || 'gpt-4.1-mini').trim(),
     baseUrl,
     keySource: gemini ? 'GEMINI_API_KEY' : legacy ? 'OPENAI_API_KEY' : 'none',
   }

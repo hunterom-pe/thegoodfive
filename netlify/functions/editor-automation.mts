@@ -24,10 +24,10 @@ export default async (req: Request) => {
   if (action === 'status') {
     // Does the AI key stored on THIS server work? Booleans, the key's shape and a one-way fingerprint only.
     const shape = keyShape(c.aiKey)
-    const check = c.aiProvider === 'gemini' ? await checkGeminiKey(c.aiKey) : { ok: null, status: 0, cause: 'Not a Google endpoint.' }
+    const check = c.aiProvider === 'gemini' ? await checkGeminiKey(c.aiKey) : { ok: null, status: 0, cause: 'Not checked: this is not Google’s Gemini endpoint (legacy OPENAI_* provider).' }
     return json(200, {
       autoPublishEnabled: c.autoPublish, alertsConfigured: Boolean(c.alertWebhook), unsplashConfigured: Boolean(c.unsplashKey), timezone: c.timezone, today: editionToday(),
-      ai: { provider: c.aiProvider, model: c.model, keySource: c.aiKeySource, keyLength: shape.length, keyPrefix: shape.prefix, fingerprint: fingerprint(c.aiKey), accepted: check.ok, cause: check.cause },
+      ai: { provider: c.aiProvider, host: new URL(c.aiBaseUrl).host, model: c.model, keySource: c.aiKeySource, keyLength: shape.length, keyPrefix: shape.prefix, fingerprint: fingerprint(c.aiKey), accepted: check.ok, cause: check.cause },
     })
   }
   if (action === 'check') {

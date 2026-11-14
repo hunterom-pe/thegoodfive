@@ -12,6 +12,8 @@ import { supabase } from './supabaseClient'
 /** Whether the AI key stored on the SERVER works. Shape and a one-way fingerprint only: never the key. */
 export interface AiStatus {
   provider: string
+  /** The host the server sends AI requests to. */
+  host: string
   model: string
   keySource: string
   keyLength: number

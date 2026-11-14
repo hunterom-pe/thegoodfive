@@ -143,7 +143,7 @@ export function AutomationPanel() {
             </>
           ) : (
             <>
-              {s.config.ai.provider === 'gemini' ? 'Gemini' : 'AI provider'} · model {s.config.ai.model} ·{' '}
+              {s.config.ai.provider === 'gemini' ? 'Gemini' : 'Other provider'} ({s.config.ai.host}) · model {s.config.ai.model} ·{' '}
               {s.config.ai.accepted ? 'key accepted' : s.config.ai.cause}
               <span className="block text-ink/70">Key from {s.config.ai.keySource}: {s.config.ai.keyLength} characters, fingerprint {s.config.ai.fingerprint}</span>
             </>

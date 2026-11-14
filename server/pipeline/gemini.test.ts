@@ -37,6 +37,21 @@ describe('configuration', () => {
   })
 })
 
+describe('precedence when GEMINI_API_KEY is set', () => {
+  const google = 'https://generativelanguage.googleapis.com/v1beta/openai'
+  it('always uses Google’s endpoint and GEMINI_MODEL, ignoring OPENAI_BASE_URL and OPENAI_MODEL', () => {
+    const c = aiConfig({ GEMINI_API_KEY: KEY, GEMINI_MODEL: 'gemini-x', OPENAI_BASE_URL: 'https://api.openai.com/v1', OPENAI_MODEL: 'gpt-4.1-mini', OPENAI_API_KEY: 'sk-old' } as NodeJS.ProcessEnv)
+    expect(c).toMatchObject({ provider: 'gemini', baseUrl: google, model: 'gemini-x', key: KEY, keySource: 'GEMINI_API_KEY' })
+  })
+  it('uses the default Gemini model when GEMINI_MODEL is empty, even if OPENAI_MODEL is set', () => {
+    expect(aiConfig({ GEMINI_API_KEY: KEY, OPENAI_MODEL: 'gpt-4.1-mini', OPENAI_BASE_URL: 'http://localhost:11434/v1' } as NodeJS.ProcessEnv)).toMatchObject({ provider: 'gemini', baseUrl: google, model: 'gemini-3.5-flash-lite' })
+  })
+  it('still honours legacy OPENAI_BASE_URL / OPENAI_MODEL when there is no Gemini key', () => {
+    expect(aiConfig({ OPENAI_API_KEY: 'k', OPENAI_BASE_URL: 'http://localhost:11434/v1/', OPENAI_MODEL: 'llama3.1' } as NodeJS.ProcessEnv)).toMatchObject({ provider: 'openai-compatible', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1', keySource: 'OPENAI_API_KEY' })
+    expect(aiConfig({ GEMINI_API_KEY: '   ', OPENAI_API_KEY: 'sk-x' } as NodeJS.ProcessEnv)).toMatchObject({ provider: 'openai-compatible', keySource: 'OPENAI_API_KEY' })
+  })
+})
+
 describe('recognising a rejected key', () => {
   it('knows Google’s key-rejection messages, and does not confuse them with other 400s', () => {
     for (const body of ['[{"error":{"code":400,"message":"Invalid Auth key.","status":"INVALID_ARGUMENT"}}]', 'Please pass a valid API key', 'API key not valid. Please pass a valid API key.', 'Missing or invalid Authorization header.']) expect(isAuthFailure(400, body), body).toBe(true)
