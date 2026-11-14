@@ -9,10 +9,23 @@ import { supabase } from './supabaseClient'
  * purpose: the database decides what is allowed (see the migration), and
  * this file only asks.
  */
+/** Whether the AI key stored on the SERVER works. Shape and a one-way fingerprint only: never the key. */
+export interface AiStatus {
+  provider: string
+  model: string
+  keySource: string
+  keyLength: number
+  keyPrefix: string
+  fingerprint: string
+  /** true = the provider accepts it, false = it rejects it, null = could not be checked. */
+  accepted: boolean | null
+  cause: string
+}
+
 /** What the dashboard shows about the automatic workflow. */
 export interface AutomationSnapshot {
   /** From the server. Null when the server can't be asked (demo mode, or the function isn't reachable). */
-  config: { autoPublishEnabled: boolean; alertsConfigured: boolean; unsplashConfigured: boolean } | null
+  config: { autoPublishEnabled: boolean; alertsConfigured: boolean; unsplashConfigured: boolean; ai: AiStatus | null } | null
   lastPublished: { date: string; publishedAt: string; automatic: boolean } | null
   generation: { status: string; error: string | null; startedAt: string; trigger: string } | null
   publication: { status: string; reason: string | null; startedAt: string; trigger: string; accepted: number; rejected: { headline: string; reasons: string[] }[] } | null
@@ -398,8 +411,8 @@ async function automationConfig(): Promise<AutomationSnapshot['config']> {
     const { data: session } = await supabase!.auth.getSession()
     const res = await fetch('/.netlify/functions/editor-automation', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session?.access_token ?? ''}` }, body: JSON.stringify({ action: 'status' }) })
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null
-    const b = (await res.json()) as { autoPublishEnabled?: boolean; alertsConfigured?: boolean; unsplashConfigured?: boolean }
-    return { autoPublishEnabled: Boolean(b.autoPublishEnabled), alertsConfigured: Boolean(b.alertsConfigured), unsplashConfigured: Boolean(b.unsplashConfigured) }
+    const b = (await res.json()) as { autoPublishEnabled?: boolean; alertsConfigured?: boolean; unsplashConfigured?: boolean; ai?: AiStatus }
+    return { autoPublishEnabled: Boolean(b.autoPublishEnabled), alertsConfigured: Boolean(b.alertsConfigured), unsplashConfigured: Boolean(b.unsplashConfigured), ai: b.ai ?? null }
   } catch {
     return null
   }

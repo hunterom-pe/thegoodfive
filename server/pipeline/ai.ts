@@ -13,6 +13,8 @@ export interface AiClient {
   json<T>(request: JsonRequest): Promise<T>
 }
 
+import { explainAuthFailure, isAuthFailure, normaliseKey } from './gemini.ts'
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Models sometimes wrap JSON in a code fence when strict schemas aren't enforced. */
@@ -31,11 +33,15 @@ export interface AiOptions {
   timeoutSeconds?: number
   /** Waits between retries of a busy provider (default 5s, 20s, 60s). */
   retryDelaysMs?: number[]
+  /** Which environment variable the key came from, for error messages. */
+  keySource?: 'GEMINI_API_KEY' | 'OPENAI_API_KEY' | 'none'
   /** Told about retries and fallbacks, so slow runs are explainable. */
   log?: (line: string) => void
 }
 
-export function openAiClient(apiKey: string, model: string, baseUrl = 'https://api.openai.com/v1', options: AiOptions = {}): AiClient {
+export function openAiClient(rawKey: string, model: string, baseUrl = 'https://api.openai.com/v1', options: AiOptions = {}): AiClient {
+  const apiKey = normaliseKey(rawKey) // survives quotes, a pasted "Bearer " and stray whitespace
+  const provider = baseUrl.includes('generativelanguage.googleapis.com') ? 'gemini' : 'openai-compatible'
   const endpoint = `${baseUrl.replace(/\/$/, '')}/chat/completions`
   return {
     async json<T>(request: JsonRequest): Promise<T> {
@@ -58,13 +64,15 @@ export function openAiClient(apiKey: string, model: string, baseUrl = 'https://a
           }),
           signal: AbortSignal.timeout((options.timeoutSeconds ?? 240) * 1000),
         })
+        const detail = res.ok ? '' : await res.clone().text()
+        // A rejected KEY is not a schema problem: report it at once instead of retrying in a different request format.
+        if (!res.ok && isAuthFailure(res.status, detail)) throw new Error(explainAuthFailure(res.status, apiKey, provider, options.keySource))
         if (res.status === 400 && strict) {
           options.log?.('AI provider rejected strict JSON schema; retrying in plain JSON mode')
           strict = false // this provider doesn't take strict schemas: try plain JSON mode
           continue
         }
         if (res.status === 429) {
-          const detail = await res.clone().text()
           if (detail.includes('insufficient_quota')) throw new Error('The AI account has no credits. Add billing credit, or point OPENAI_BASE_URL at a free provider.')
         }
         // Rate limits and overloaded servers are usually brief: wait and retry a few times (5s, 20s, 60s).
@@ -75,7 +83,6 @@ export function openAiClient(apiKey: string, model: string, baseUrl = 'https://a
           await sleep(wait)
           continue
         }
-        if (res.status === 401 || res.status === 403) throw new Error('The AI provider rejected the API key. Check OPENAI_API_KEY.')
         if (!res.ok) throw new Error(`AI provider error ${res.status}: ${(await res.text()).slice(0, 240)}`)
         const body = (await res.json()) as { choices?: { finish_reason?: string; message?: { content?: string; refusal?: string } }[] }
         const choice = body.choices?.[0]

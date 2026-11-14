@@ -70,7 +70,7 @@ Setup: run `supabase/migrations/20261114000000_image_provenance.sql`, then add `
 
 **Setup**
 1. Run `supabase/migrations/20261113000200_generated_drafts.sql` in the SQL Editor (after the first two).
-2. Add the server secrets from `.env.example` (`SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `GENERATION_SECRET`) to Netlify and to `.env.local`.
+2. Add the server secrets from `.env.example` (`SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GENERATION_SECRET`) to Netlify and to `.env.local`. The older `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` names still work, but `GEMINI_*` wins if both are set; remove the old ones on Netlify to avoid confusion. Run `npm run ai:check` to test the key (it prints a fingerprint, never the key); the editor's Automation panel shows the same fingerprint for the key the server actually uses.
 3. Deploy. Functions only run on Netlify (or locally via `npx netlify dev`); the plain `npm run dev` server can't run them.
 
 Check a run's outcome in the `discovery_runs` table (status, counts, error).

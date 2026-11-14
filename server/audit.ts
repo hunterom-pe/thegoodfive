@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { SCHEDULE } from '../src/lib/schedule.ts'
+import { checkGeminiKey, fingerprint, keyShape } from './pipeline/gemini.ts'
 import { admin, editionToday, env, supabasePublishStore } from './store.ts'
 
 type Level = 'PASS' | 'WARN' | 'FAIL' | 'MANUAL'
@@ -23,10 +24,12 @@ const REQUIRED: [string, string][] = [
   ['VITE_SUPABASE_URL', 'public site: where to read editions'],
   ['VITE_SUPABASE_ANON_KEY', 'public site: read-only key (public by design)'],
   ['SUPABASE_SERVICE_ROLE_KEY', 'server: drafts, publishing, run logs (SECRET)'],
-  ['OPENAI_API_KEY', 'server: AI provider key, any OpenAI-compatible provider (SECRET)'],
   ['GENERATION_SECRET', 'server: lets scheduled functions start the background job (SECRET)'],
 ]
 const OPTIONAL: [string, string][] = [
+  ['GEMINI_API_KEY', 'AI key for Google Gemini (SECRET). Preferred name; OPENAI_API_KEY still works'],
+  ['GEMINI_MODEL', 'Gemini model (default gemini-3.5-flash-lite)'],
+  ['OPENAI_API_KEY', 'older name for the AI key (SECRET), works with any OpenAI-compatible provider'],
   ['OPENAI_BASE_URL', 'AI provider address (default: OpenAI)'],
   ['OPENAI_MODEL', 'AI model (default: gpt-4.1-mini)'],
   ['UNSPLASH_ACCESS_KEY', 'editor photo search only; never used by scheduled runs'],
@@ -35,6 +38,7 @@ const OPTIONAL: [string, string][] = [
   ['AUTO_PUBLISH_ENABLED', 'master switch: only the exact value "true" turns it on'],
   ['EDITION_TIMEZONE', 'default America/Phoenix'],
 ]
+note(set('GEMINI_API_KEY') || set('OPENAI_API_KEY') ? 'PASS' : 'FAIL', 'env', `AI key (GEMINI_API_KEY, or the older OPENAI_API_KEY) ${set('GEMINI_API_KEY') || set('OPENAI_API_KEY') ? 'is set' : 'is MISSING'} (server: news screening and writing, SECRET)`)
 for (const [k, why] of REQUIRED) note(set(k) ? 'PASS' : 'FAIL', 'env', `${k} ${set(k) ? 'is set' : 'is MISSING'} (${why})`)
 for (const [k, why] of OPTIONAL) note('PASS', 'env', `${k} ${set(k) ? 'is set' : 'not set'} (${why})`)
 for (const k of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY']) if (!set(k) && !set(k.replace('VITE_', ''))) note('WARN', 'env', `${k} is not set in this shell`)
@@ -108,10 +112,16 @@ if (c.supabaseUrl && c.serviceKey) {
 } else note('FAIL', 'supabase', 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set: cannot inspect the live project.')
 
 // ── 4. Provider keys (status only) ───────────────────────────────────────
-if (c.openAiKey) {
+if (c.aiKey) {
+  const shape = keyShape(e[c.aiKeySource === 'none' ? 'OPENAI_API_KEY' : c.aiKeySource] ?? '')
+  note(shape.problems.length ? 'WARN' : 'PASS', 'ai', `AI key from ${c.aiKeySource}: ${shape.length} characters, prefix ${shape.prefix}, fingerprint ${fingerprint(c.aiKey)}${shape.problems.length ? `; stored with ${shape.problems.join(', ')} (cleaned automatically)` : ''}`)
+  if (c.aiProvider === 'gemini') {
+    const check = await checkGeminiKey(c.aiKey)
+    note(check.ok === true ? 'PASS' : check.ok === false ? 'FAIL' : 'WARN', 'ai', `Google's native API (x-goog-api-key) ${check.ok === true ? 'accepts the key' : check.ok === false ? 'REJECTS the key: it is truncated, altered, revoked or from another project' : `could not confirm it (${check.cause})`}; model "${c.model}"`)
+  }
   try {
-    const r = await fetch(`${c.aiBaseUrl.replace(/\/$/, '')}/models`, { headers: { Authorization: `Bearer ${c.openAiKey}` }, signal: AbortSignal.timeout(15_000) })
-    note(r.ok ? 'PASS' : 'FAIL', 'ai', `AI provider (${new URL(c.aiBaseUrl).host}) accepts the key: ${r.ok ? 'yes' : `no (HTTP ${r.status})`}; model "${c.model}"`)
+    const r = await fetch(`${c.aiBaseUrl}/models`, { headers: { Authorization: `Bearer ${c.aiKey}` }, signal: AbortSignal.timeout(15_000) })
+    note(r.ok ? 'PASS' : 'FAIL', 'ai', `The endpoint the application uses (${new URL(c.aiBaseUrl).host}) accepts the key: ${r.ok ? 'yes' : `no (HTTP ${r.status})`}`)
   } catch {
     note('WARN', 'ai', 'Could not reach the AI provider to check the key.')
   }
@@ -139,7 +149,7 @@ note(bg && bg.status !== 404 ? 'PASS' : 'FAIL', 'deployed', `generate-draft-back
 
 // ── 6. Secrets handling ──────────────────────────────────────────────────
 const tracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean)
-const secrets = ['SUPABASE_SERVICE_ROLE_KEY', 'OPENAI_API_KEY', 'GENERATION_SECRET', 'UNSPLASH_ACCESS_KEY', 'ALERT_WEBHOOK_URL'].filter((k) => set(k))
+const secrets = ['SUPABASE_SERVICE_ROLE_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'GENERATION_SECRET', 'UNSPLASH_ACCESS_KEY', 'ALERT_WEBHOOK_URL'].filter((k) => set(k))
 let leaked = 0
 for (const k of secrets) for (const f of tracked) { try { if (readFileSync(f, 'utf8').includes(e[k]!)) { leaked++; note('FAIL', 'secrets', `The value of ${k} appears in tracked file ${f}!`) } } catch { /* binary or missing */ } }
 note(leaked === 0 ? 'PASS' : 'FAIL', 'secrets', `Checked ${secrets.length} secret value(s) against ${tracked.length} tracked files: ${leaked === 0 ? 'none found' : `${leaked} leak(s)`}`)

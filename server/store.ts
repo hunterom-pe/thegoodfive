@@ -2,20 +2,24 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
 import { webhookNotifier } from './alerts.ts'
+import { aiConfig } from './pipeline/gemini.ts'
 
 /** Server-side configuration. None of these are ever sent to a browser. */
 export function env() {
   const e = process.env
+  const ai = aiConfig(e)
   return {
     supabaseUrl: (e.SUPABASE_URL || e.VITE_SUPABASE_URL || '').replace(/\/$/, ''),
     serviceKey: e.SUPABASE_SERVICE_ROLE_KEY || '',
-    openAiKey: e.OPENAI_API_KEY || '',
+    aiKey: ai.key,
+    aiKeySource: ai.keySource,
+    aiProvider: ai.provider,
     unsplashKey: e.UNSPLASH_ACCESS_KEY || '',
     appName: e.UNSPLASH_APP_NAME || 'thegoodfive',
-    model: e.OPENAI_MODEL || 'gpt-4.1-mini',
+    model: ai.model,
     reasoningEffort: e.AI_REASONING_EFFORT || undefined,
     aiTimeoutSeconds: Number(e.AI_TIMEOUT_SECONDS || 240),
-    aiBaseUrl: e.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    aiBaseUrl: ai.baseUrl,
     secret: e.GENERATION_SECRET || '',
     timezone: e.EDITION_TIMEZONE || e.VITE_EDITION_TIMEZONE || 'America/Phoenix',
     autoPublish: (e.AUTO_PUBLISH_ENABLED ?? '').trim().toLowerCase() === 'true',
@@ -30,7 +34,7 @@ export function env() {
 
 export function missingConfig(): string[] {
   const c = env()
-  return [!c.supabaseUrl && 'SUPABASE_URL', !c.serviceKey && 'SUPABASE_SERVICE_ROLE_KEY', !c.openAiKey && 'OPENAI_API_KEY'].filter(Boolean) as string[]
+  return [!c.supabaseUrl && 'SUPABASE_URL', !c.serviceKey && 'SUPABASE_SERVICE_ROLE_KEY', !c.aiKey && 'GEMINI_API_KEY (or OPENAI_API_KEY)'].filter(Boolean) as string[]
 }
 
 export function admin(): SupabaseClient {
@@ -102,7 +106,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`The run took longer than ${Math.round(c.runDeadlineMs / 60_000)} minutes and was stopped. Try again, or use a faster AI model.`)), c.runDeadlineMs)
     })
-    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
+    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) {
       await webhookNotifier(c.alertWebhook)(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)

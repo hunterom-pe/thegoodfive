@@ -134,6 +134,21 @@ export function AutomationPanel() {
         <Row label="Stories">
           {s.publication ? `${s.publication.accepted} accepted · ${rejected.length} turned away` : s.today ? `${s.today.primary} in the lineup · ${s.today.rejected.length} turned away` : '—'}
         </Row>
+        <Row label="AI provider">
+          {!s.config?.ai ? (
+            'Unknown here.'
+          ) : s.config.ai.accepted === false ? (
+            <>
+              <strong className="text-earth">The server’s AI key is rejected.</strong> Google does not recognise the key stored in <code className="bg-mist px-1">{s.config.ai.keySource}</code> ({s.config.ai.keyLength} characters, starts “{s.config.ai.keyPrefix}”, fingerprint <code className="bg-mist px-1">{s.config.ai.fingerprint}</code>). Re-copy the key from Google AI Studio into Netlify, then redeploy. <span className="text-ink/70">Run <code className="bg-mist px-1">npm run ai:check</code> on your computer: its fingerprint should match.</span>
+            </>
+          ) : (
+            <>
+              {s.config.ai.provider === 'gemini' ? 'Gemini' : 'AI provider'} · model {s.config.ai.model} ·{' '}
+              {s.config.ai.accepted ? 'key accepted' : s.config.ai.cause}
+              <span className="block text-ink/70">Key from {s.config.ai.keySource}: {s.config.ai.keyLength} characters, fingerprint {s.config.ai.fingerprint}</span>
+            </>
+          )}
+        </Row>
         <Row label="Failure alerts">{s.config === null ? 'Unknown here.' : s.config.alertsConfigured ? 'On: a message is sent to your webhook when something fails.' : 'Off. Add ALERT_WEBHOOK_URL to be told when something fails.'}</Row>
       </dl>
 

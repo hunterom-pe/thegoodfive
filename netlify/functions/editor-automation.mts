@@ -1,5 +1,6 @@
 import { makeSourceChecker, runAutoPublish } from '../../server/autopublish.ts'
 import { trustedDomains } from '../../server/pipeline/sources.ts'
+import { checkGeminiKey, fingerprint, keyShape } from '../../server/pipeline/gemini.ts'
 import { admin, authenticateEditor, editionToday, env, supabasePublishStore } from '../../server/store.ts'
 
 const json = (status: number, body: Record<string, unknown>) =>
@@ -21,7 +22,13 @@ export default async (req: Request) => {
 
   const { action } = (await req.json().catch(() => ({}))) as { action?: string }
   if (action === 'status') {
-    return json(200, { autoPublishEnabled: c.autoPublish, alertsConfigured: Boolean(c.alertWebhook), unsplashConfigured: Boolean(c.unsplashKey), timezone: c.timezone, today: editionToday() })
+    // Does the AI key stored on THIS server work? Booleans, the key's shape and a one-way fingerprint only.
+    const shape = keyShape(c.aiKey)
+    const check = c.aiProvider === 'gemini' ? await checkGeminiKey(c.aiKey) : { ok: null, status: 0, cause: 'Not a Google endpoint.' }
+    return json(200, {
+      autoPublishEnabled: c.autoPublish, alertsConfigured: Boolean(c.alertWebhook), unsplashConfigured: Boolean(c.unsplashKey), timezone: c.timezone, today: editionToday(),
+      ai: { provider: c.aiProvider, model: c.model, keySource: c.aiKeySource, keyLength: shape.length, keyPrefix: shape.prefix, fingerprint: fingerprint(c.aiKey), accepted: check.ok, cause: check.cause },
+    })
   }
   if (action === 'check') {
     const outcome = await runAutoPublish({
