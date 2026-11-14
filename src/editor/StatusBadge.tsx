@@ -27,7 +27,7 @@ export function StatusSteps({ status }: { status: EditionStatus }) {
         <li key={step} className="flex items-center gap-2">
           {i > 0 && <span className={`h-px w-4 sm:w-8 ${i <= at ? 'bg-forest' : 'bg-line'}`} aria-hidden="true" />}
           <span className={`size-2.5 border border-forest ${i <= at ? 'bg-forest' : ''}`} aria-hidden="true" />
-          <span className={`label ${i === at ? 'text-forest' : 'text-ink/45'}`}>{STYLE[step].label}</span>
+          <span className={`label ${i === at ? 'text-forest' : 'text-ink/70'}`}>{STYLE[step].label}</span>
         </li>
       ))}
     </ol>

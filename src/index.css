@@ -9,6 +9,9 @@
   --color-forest: #304d3c;
   --color-forest-deep: #223a2c;
   --color-sage: #a5b49a;
+  /* Text-safe sages: the brand sage fails WCAG AA as text (2.1:1 on chalk, 4.3:1 on forest). */
+  --color-sage-deep: #5f6f55; /* 5.2:1 on chalk, 4.7:1 on mist */
+  --color-sage-light: #c3cfb9; /* 5.8:1 on forest */
   --color-earth: #80634d;
   --color-blush: #ebc9cc;
   --color-ink: #1e2a23;
@@ -18,7 +21,7 @@
   --font-display: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
   --font-sans: 'DM Sans Variable', ui-sans-serif, system-ui, sans-serif;
 
-  --breakpoint-xs: 23.75rem;
+  --breakpoint-xs: 23.125rem; /* 370px: the five-square progress fits from here */
 }
 
 @layer base {
@@ -43,6 +46,14 @@
   :focus-visible {
     outline: 2px solid var(--color-forest);
     outline-offset: 3px;
+  }
+  /* Programmatic focus (the skip link) moves the reader to the content without a ring around the whole page. */
+  main:focus {
+    outline: none;
+  }
+  /* On the forest-green closing page the default green ring would vanish. */
+  .on-dark :focus-visible {
+    outline-color: var(--color-chalk);
   }
   @media (prefers-reduced-motion: no-preference) {
     html {

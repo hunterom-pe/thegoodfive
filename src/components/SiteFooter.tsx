@@ -32,7 +32,7 @@ export function SiteFooter() {
             </Link>
           </nav>
         </div>
-        <p className="mt-10 border-t border-line pt-5 text-[0.75rem] leading-relaxed text-ink/60">
+        <p className="mt-10 border-t border-line pt-5 text-[0.75rem] leading-relaxed text-ink/70">
           © {new Date().getFullYear()} The Good Five. Summaries are our own; every story links to the original reporting, and all rights in those articles and images remain with their publishers.
         </p>
       </div>

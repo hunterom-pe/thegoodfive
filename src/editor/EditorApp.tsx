@@ -19,11 +19,11 @@ function Shell({ children, email, demo }: { children: ReactNode; email?: string;
             <span className="label bg-forest px-1.5 py-1 text-[0.5625rem] text-chalk">Editor</span>
           </Link>
           <nav className="flex items-center gap-5">
-            <Link to="/" className="label flex h-11 items-center text-ink/60 hover:text-forest">
+            <Link to="/" className="label flex h-11 items-center text-ink/70 hover:text-forest">
               View site
             </Link>
             {!demo && (
-              <button type="button" className="label flex h-11 items-center text-ink/60 hover:text-forest" onClick={() => void signOut()} title={email}>
+              <button type="button" className="label flex h-11 items-center text-ink/70 hover:text-forest" onClick={() => void signOut()} title={email}>
                 Sign out
               </button>
             )}

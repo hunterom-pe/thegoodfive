@@ -3,6 +3,7 @@ import { Arrow } from '../components/Brand'
 import { two } from '../components/StoryParts'
 import { CATEGORIES, CATEGORY_KEYS } from '../lib/categories'
 import { formatShort } from '../lib/dates'
+import { PhotoPanel } from './PhotoPanel'
 import type { Category, EditorStory, StoryPatch } from '../lib/types'
 
 export const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0)
@@ -12,7 +13,7 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
     <label className="block">
       <span className="flex items-baseline justify-between gap-3">
         <span className="label text-earth">{label}</span>
-        {hint && <span className="text-[0.75rem] text-ink/60">{hint}</span>}
+        {hint && <span className="text-[0.75rem] text-ink/70">{hint}</span>}
       </span>
       <span className="mt-1.5 block">{children}</span>
     </label>
@@ -83,10 +84,15 @@ export function StoryReviewCard({
         <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((o) => !o)} className="min-w-0 flex-1 px-3.5 py-3.5 text-left">
           <span className="label flex flex-wrap items-center gap-x-2 gap-y-1 text-earth">
             {CATEGORIES[value.category].short}
-            <span className="font-normal normal-case tracking-normal text-ink/60">
+            <span className="font-normal normal-case tracking-normal text-ink/70">
               {value.sourceName}
               {value.sourcePublishedAt && ` · ${formatShort(value.sourcePublishedAt)}`}
             </span>
+            {story.imageUrl && (
+              <span className={`px-1.5 py-0.5 text-[0.5625rem] ${story.imageRightsConfirmed ? 'bg-mist text-forest' : 'bg-blush text-forest-deep'}`}>
+                {story.imageRightsConfirmed ? 'Photo approved' : 'Photo NOT approved'}
+              </span>
+            )}
             {dirty && <span className="bg-blush px-1.5 py-0.5 text-[0.5625rem] text-forest-deep">Unsaved</span>}
           </span>
           <span className="display mt-1.5 block text-[1.25rem] !leading-[1.15]">{value.headline || 'Untitled'}</span>
@@ -145,9 +151,9 @@ export function StoryReviewCard({
                 )}
               </dl>
             ) : (
-              <p className="mt-1 text-[0.875rem] text-ink/60">No research notes were stored with this story.</p>
+              <p className="mt-1 text-[0.875rem] text-ink/70">No research notes were stored with this story.</p>
             )}
-            <p className="mt-3 border-t border-sage/60 pt-3 text-[0.75rem] leading-relaxed text-ink/60">The AI’s assessment is a starting point, not a fact-check. Read the original before you approve.</p>
+            <p className="mt-3 border-t border-sage/60 pt-3 text-[0.75rem] leading-relaxed text-ink/70">The AI’s assessment is a starting point, not a fact-check. Read the original before you approve.</p>
           </section>
 
           <Field label="Headline">
@@ -177,36 +183,7 @@ export function StoryReviewCard({
             </Field>
           </div>
 
-          <div className="border-t border-line pt-5">
-            <p className="label mb-3 text-forest">Photograph</p>
-            <p className="text-[0.8125rem] leading-relaxed text-ink/60">
-              Optional. A preview image on a news site is not permission to reuse it. Without confirmed rights, readers see the square composition instead.
-            </p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field label="Image URL">
-                <input type="url" inputMode="url" className="field" value={value.imageUrl ?? ''} onChange={(e) => set('imageUrl', e.target.value || null)} />
-              </Field>
-              <Field label="Alt text">
-                <input className="field" value={value.imageAlt ?? ''} onChange={(e) => set('imageAlt', e.target.value || null)} />
-              </Field>
-              <Field label="Credit">
-                <input className="field" value={value.imageCredit ?? ''} onChange={(e) => set('imageCredit', e.target.value || null)} />
-              </Field>
-              <Field label="Licence">
-                <input className="field" placeholder="e.g. CC BY 4.0, Unsplash License" value={value.imageLicense ?? ''} onChange={(e) => set('imageLicense', e.target.value || null)} />
-              </Field>
-            </div>
-            <label className="mt-4 flex min-h-11 items-center gap-3 text-[0.9375rem]">
-              <input
-                type="checkbox"
-                className="size-5 accent-forest"
-                checked={value.imageRightsConfirmed}
-                disabled={!value.imageUrl}
-                onChange={(e) => set('imageRightsConfirmed', e.target.checked)}
-              />
-              I’ve confirmed we have the right to publish this image
-            </label>
-          </div>
+          <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={actions.onSave} />
 
           {dirty && !locked && (
             <div className="flex flex-wrap gap-3 border-t border-line pt-5">
@@ -224,7 +201,7 @@ export function StoryReviewCard({
       {/* Lineup controls */}
       <div className="flex flex-wrap items-center gap-2 border-t border-line bg-chalk px-3 py-2.5">
         {locked ? (
-          <p className="py-2 text-[0.8125rem] text-ink/60">Locked while published. Unpublish the edition to make changes.</p>
+          <p className="py-2 text-[0.8125rem] text-ink/70">Locked while published. Unpublish the edition to make changes.</p>
         ) : rejecting ? (
           <form
             className="flex w-full flex-wrap items-end gap-2"

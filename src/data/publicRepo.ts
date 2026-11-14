@@ -1,6 +1,6 @@
 import { IS_DEMO, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/config'
 import { todayISO } from '../lib/dates'
-import type { Category, EditionSummary, EditorEdition, PublicEdition, PublicStory } from '../lib/types'
+import type { Category, EditionSummary, ImageKind, EditorEdition, PublicEdition, PublicStory } from '../lib/types'
 import { demoStore } from './demoStore'
 
 /**
@@ -8,10 +8,26 @@ import { demoStore } from './demoStore'
  * editions dated today or earlier; the database views enforce "published",
  * and nothing here calls a news or AI service.
  */
+export interface ArchivePage {
+  items: EditionSummary[]
+  /** Pass this back to get the next, older page. Null when there is nothing earlier. */
+  nextCursor: string | null
+}
+
+export const ARCHIVE_PAGE_SIZE = 24
+
 export interface PublicRepo {
   latest(): Promise<PublicEdition | null>
   byDate(date: string): Promise<PublicEdition | null>
-  archive(): Promise<EditionSummary[]>
+  /** Editions newest first, one page at a time. `before` is the previous page's nextCursor. */
+  archive(before?: string | null): Promise<ArchivePage>
+}
+
+/** Cursor paging over a newest-first list of editions (used by demo mode and tests). */
+export function paginateArchive(all: EditionSummary[], before: string | null | undefined, size = ARCHIVE_PAGE_SIZE): ArchivePage {
+  const older = before ? all.filter((e) => e.date < before) : all
+  const items = older.slice(0, size)
+  return { items, nextCursor: older.length > size ? items[items.length - 1].date : null }
 }
 
 // ── Demo ────────────────────────────────────────────────────────────────
@@ -37,6 +53,10 @@ function toPublic(edition: EditorEdition): PublicEdition {
         imageUrl: s.imageRightsConfirmed ? s.imageUrl : null,
         imageAlt: s.imageRightsConfirmed ? s.imageAlt : null,
         imageCredit: s.imageRightsConfirmed ? s.imageCredit : null,
+        imageKind: s.imageRightsConfirmed ? s.imageKind : null,
+        imageLicense: s.imageRightsConfirmed ? s.imageLicense : null,
+        imageSourceUrl: s.imageRightsConfirmed ? s.imageSourceUrl : null,
+        imageCreditUrl: s.imageRightsConfirmed ? s.imageCreditUrl : null,
       })),
   }
 }
@@ -59,11 +79,14 @@ const demoRepo: PublicRepo = {
     const found = demoPublished().find((e) => e.date === date)
     return found ? toPublic(found) : null
   },
-  async archive() {
-    return demoPublished().map((e) => {
-      const { id, date, isDemo, stories } = toPublic(e)
-      return { id, date, isDemo, stories: stories.map(({ position, category, headline }) => ({ position, category, headline })) }
-    })
+  async archive(before) {
+    return paginateArchive(
+      demoPublished().map((e) => {
+        const { id, date, isDemo, stories } = toPublic(e)
+        return { id, date, isDemo, stories: stories.map(({ position, category, headline }) => ({ position, category, headline })) }
+      }),
+      before,
+    )
   },
 }
 
@@ -87,6 +110,10 @@ interface StoryRow {
   image_url: string | null
   image_alt: string | null
   image_credit: string | null
+  image_kind: ImageKind | null
+  image_license: string | null
+  image_source_url: string | null
+  image_credit_url: string | null
 }
 
 async function rest<T>(path: string): Promise<T> {
@@ -109,6 +136,10 @@ const storyFromRow = (r: StoryRow): PublicStory => ({
   imageUrl: r.image_url,
   imageAlt: r.image_alt,
   imageCredit: r.image_credit,
+  imageKind: r.image_kind ?? null,
+  imageLicense: r.image_license ?? null,
+  imageSourceUrl: r.image_source_url ?? null,
+  imageCreditUrl: r.image_credit_url ?? null,
 })
 
 async function loadEdition(filter: string): Promise<PublicEdition | null> {
@@ -129,20 +160,21 @@ async function loadEdition(filter: string): Promise<PublicEdition | null> {
 const supabaseRepo: PublicRepo = {
   latest: () => loadEdition('id=not.is.null'),
   byDate: (date) => loadEdition(`edition_date=eq.${date}`),
-  async archive() {
-    const editions = await rest<EditionRow[]>(
-      `public_editions?select=id,edition_date&edition_date=lte.${todayISO()}&order=edition_date.desc&limit=120`,
+  async archive(before) {
+    // One extra row tells us whether an older page exists.
+    const cursor = before ? `&edition_date=lt.${before}` : ''
+    const rows = await rest<EditionRow[]>(
+      `public_editions?select=id,edition_date&edition_date=lte.${todayISO()}${cursor}&order=edition_date.desc&limit=${ARCHIVE_PAGE_SIZE + 1}`,
     )
-    if (editions.length === 0) return []
+    const editions = rows.slice(0, ARCHIVE_PAGE_SIZE)
+    if (editions.length === 0) return { items: [], nextCursor: null }
     const stories = await rest<Pick<StoryRow, 'edition_id' | 'position' | 'category' | 'headline'>[]>(
       `public_stories?select=edition_id,position,category,headline&edition_id=in.(${editions.map((e) => e.id).join(',')})&order=position.asc`,
     )
-    return editions.map((e) => ({
-      id: e.id,
-      date: e.edition_date,
-      isDemo: false,
-      stories: stories.filter((s) => s.edition_id === e.id),
-    }))
+    return {
+      items: editions.map((e) => ({ id: e.id, date: e.edition_date, isDemo: false, stories: stories.filter((s) => s.edition_id === e.id) })),
+      nextCursor: rows.length > ARCHIVE_PAGE_SIZE ? editions[editions.length - 1].edition_date : null,
+    }
   },
 }
 

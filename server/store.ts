@@ -9,6 +9,8 @@ export function env() {
     supabaseUrl: (e.SUPABASE_URL || e.VITE_SUPABASE_URL || '').replace(/\/$/, ''),
     serviceKey: e.SUPABASE_SERVICE_ROLE_KEY || '',
     openAiKey: e.OPENAI_API_KEY || '',
+    unsplashKey: e.UNSPLASH_ACCESS_KEY || '',
+    appName: e.UNSPLASH_APP_NAME || 'thegoodfive',
     model: e.OPENAI_MODEL || 'gpt-4.1-mini',
     reasoningEffort: e.AI_REASONING_EFFORT || undefined,
     aiTimeoutSeconds: Number(e.AI_TIMEOUT_SECONDS || 240),
@@ -34,6 +36,9 @@ export function admin(): SupabaseClient {
 export function editionToday(timeZone = env().timezone, now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
 }
+
+/** Well inside Netlify's 15-minute background limit. */
+export const RUN_DEADLINE_MS = 13 * 60_000
 
 export type StartResult = { ok: true; runId: string; date: string } | { ok: false; status: 409 | 429 | 500; message: string }
 
@@ -81,7 +86,13 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const { data: recent } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
 
-    const result = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log })
+    // Netlify stops background functions at 15 minutes with no word. Stop ourselves first, so the run is
+    // recorded as failed with a clear reason and the editor's page (which waits 16 minutes) hears about it.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The run took longer than 13 minutes and was stopped. Try again, or use a faster AI model.')), RUN_DEADLINE_MS)
+    })
+    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log, images: { unsplashKey: c.unsplashKey || undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) return await finish(db, runId, 'skipped', stats, 'No suitable stories were found. Nothing was saved.')
 
@@ -113,4 +124,15 @@ export async function triggerBackground(db: SupabaseClient, runId: string, date:
     await finish(db, runId, 'failed', {}, message)
     return { ok: false, message }
   }
+}
+
+/** Verify an editor's session token server-side. Returns the user id, or the HTTP error to send back. */
+export async function authenticateEditor(db: SupabaseClient, authorization: string | null): Promise<{ ok: true; userId: string } | { ok: false; status: 401 | 403; message: string }> {
+  const token = (authorization ?? '').replace(/^Bearer\s+/i, '')
+  if (!token) return { ok: false, status: 401, message: 'Sign in again.' }
+  const { data: auth, error } = await db.auth.getUser(token)
+  if (error || !auth.user) return { ok: false, status: 401, message: 'Your session has expired. Sign in again.' }
+  const { data: editor } = await db.from('editors').select('user_id').eq('user_id', auth.user.id).maybeSingle()
+  if (!editor) return { ok: false, status: 403, message: 'This account is not an editor.' }
+  return { ok: true, userId: auth.user.id }
 }

@@ -30,9 +30,20 @@ function build(today: string): EditorEdition[] {
         sourcePublishedAt: addDays(date, -s.age),
         imageUrl: s.photo ? unsplash(s.photo.id) : null,
         imageAlt: s.photo?.alt ?? null,
-        imageCredit: s.photo ? 'Unsplash' : null,
+        imageCredit: s.photo ? 'Unsplash contributor' : null,
         imageLicense: s.photo ? 'Unsplash License' : null,
         imageRightsConfirmed: Boolean(s.photo),
+        imageKind: s.photo ? 'illustrative' : null,
+        imageSource: s.photo ? 'sample' : null,
+        imageSourceUrl: s.photo ? 'https://unsplash.com/' : null,
+        imageCreditUrl: s.photo ? 'https://unsplash.com/' : null,
+        imageCandidates:
+          edition.status === 'draft' && i === 0 && s.photo
+            ? [
+                { url: unsplash('1470071459604-3b5ec3a7fe05'), alt: null, kind: 'original', source: 'og:image', credit: s.source, creditUrl: 'https://example.org/sample-story', license: null, sourceUrl: 'https://example.org/sample-story' },
+                { url: unsplash('1441974231531-c6227db76b6e'), alt: 'A sunlit path through tall woodland', kind: 'illustrative', source: 'unsplash', credit: 'Sample photographer', creditUrl: 'https://unsplash.com/', license: 'Unsplash License', sourceUrl: 'https://unsplash.com/' },
+              ]
+            : [],
         originalTitle: s.research?.originalTitle ?? null,
         originalExcerpt: s.research?.excerpt ?? null,
         discoveredVia: s.research ? 'Sample feed' : null,
@@ -135,6 +146,11 @@ export const demoStore = {
         imageCredit: input.imageCredit,
         imageLicense: input.imageLicense,
         imageRightsConfirmed: Boolean(input.imageUrl) && input.imageRightsConfirmed,
+        imageKind: null,
+        imageSource: input.imageUrl ? 'manual' : null,
+        imageSourceUrl: null,
+        imageCreditUrl: null,
+        imageCandidates: [],
         originalTitle: null,
         originalExcerpt: null,
         discoveredVia: 'Added by editor',

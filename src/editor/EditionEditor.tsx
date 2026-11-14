@@ -54,6 +54,8 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
     setError('')
     try {
       await editorRepo.updateStory(edition.id, story.id, patch)
+      // Choosing an Unsplash photo must be reported to Unsplash (its API guidelines). Fire and forget.
+      if (patch.imageSource === 'unsplash' && patch.imageUrl) void editorRepo.trackImageUse(story.id)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.')
       throw e
@@ -86,7 +88,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
       <section className="mt-9">
         <h2 className="label flex items-center justify-between border-b border-forest pb-2 text-forest">
           <span>The five</span>
-          <span className={primary.length === EDITION_SIZE ? 'text-ink/50' : 'text-earth'}>
+          <span className={primary.length === EDITION_SIZE ? 'text-ink/70' : 'text-earth'}>
             {primary.length} / {EDITION_SIZE}
           </span>
         </h2>
@@ -121,7 +123,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
 
       <section className="mt-12">
         <h2 className="label border-b border-forest pb-2 text-forest">Backups ({backup.length})</h2>
-        {backup.length === 0 && <p className="py-4 text-[0.9375rem] text-ink/60">No backups left for this edition.</p>}
+        {backup.length === 0 && <p className="py-4 text-[0.9375rem] text-ink/70">No backups left for this edition.</p>}
         <ol className="mt-4 space-y-3">
           {backup.map((story) => (
             <StoryReviewCard
@@ -160,13 +162,13 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
 
       {rejected.length > 0 && (
         <section className="mt-12">
-          <h2 className="label border-b border-line pb-2 text-ink/60">Rejected ({rejected.length})</h2>
+          <h2 className="label border-b border-line pb-2 text-ink/70">Rejected ({rejected.length})</h2>
           <ul>
             {rejected.map((story) => (
               <li key={story.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-3">
                 <span className="min-w-0 flex-1 basis-56">
                   <span className="block text-[0.9375rem] text-ink/70 line-through decoration-ink/30">{story.headline}</span>
-                  <span className="mt-0.5 block text-[0.8125rem] text-ink/60">
+                  <span className="mt-0.5 block text-[0.8125rem] text-ink/70">
                     {story.sourceName}
                     {story.rejectedReason && ` · “${story.rejectedReason}”`}
                   </span>

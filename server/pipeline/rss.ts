@@ -24,6 +24,20 @@ function atomLink(link: unknown): string {
   return typeof best === 'string' ? best : (best?.['@_href'] ?? '')
 }
 
+/** The item's own image from media:content, media:thumbnail or an image enclosure (RSS and Atom). */
+function feedImage(item: Record<string, unknown>): string | null {
+  const nodes = [item['media:content'], item['media:thumbnail'], item.enclosure, item['itunes:image']].flatMap((n) => list(n as Record<string, string> | Record<string, string>[] | undefined))
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue
+    const url = node['@_url'] ?? node['@_href']
+    const type = node['@_type'] ?? ''
+    const medium = node['@_medium'] ?? ''
+    const looksLikeImage = type.startsWith('image/') || medium === 'image' || /\.(jpe?g|png|webp)(\?|$)/i.test(url ?? '')
+    if (url && looksLikeImage && /^https?:\/\//i.test(url)) return decodeEntities(url)
+  }
+  return null
+}
+
 /** Parse RSS 2.0 or Atom into candidates. Items without a title or an http link are dropped. */
 export function parseFeed(xml: string, feed: Feed): Candidate[] {
   const doc = parser.parse(xml) as Record<string, any>
@@ -36,12 +50,14 @@ export function parseFeed(xml: string, feed: Feed): Candidate[] {
       url: text(item.link) || text(item.guid),
       date: text(item.pubDate) || text(item['dc:date']),
       body: text(item.description) || text(item['content:encoded']),
+      image: feedImage(item),
     })),
     ...atomEntries.map((entry: Record<string, unknown>) => ({
       title: text(entry.title),
       url: atomLink(entry.link),
       date: text(entry.published) || text(entry.updated),
       body: text(entry.summary) || text(entry.content),
+      image: feedImage(entry),
     })),
   ]
 
@@ -57,6 +73,7 @@ export function parseFeed(xml: string, feed: Feed): Candidate[] {
       excerpt: truncate(stripHtml(item.body), 600),
       via: `RSS: ${feed.name}`,
       trust: feed.trust,
+      imageUrl: item.image,
     }))
 }
 

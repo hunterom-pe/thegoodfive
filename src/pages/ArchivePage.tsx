@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FiveSquares, wrap } from '../components/Brand'
 import { DemoNotice } from '../components/EditionView'
@@ -35,7 +36,7 @@ function EditionRow({ edition, isToday }: { edition: EditionSummary; isToday: bo
         <ol className="col-start-2 mt-4 space-y-1.5 lg:col-start-3 lg:mt-0">
           {rest.map((s) => (
             <li key={s.position} className="flex gap-3 text-[0.875rem] leading-snug text-ink/75">
-              <span className="w-4 shrink-0 font-semibold tabular-nums text-sage">{s.position}</span>
+              <span className="w-4 shrink-0 font-semibold tabular-nums text-sage-deep">{s.position}</span>
               {s.headline}
             </li>
           ))}
@@ -50,16 +51,34 @@ export function ArchivePage() {
   const [state, retry] = useAsync(() => publicRepo.archive(), 'archive')
   const today = todayISO()
 
-  const months = new Map<string, EditionSummary[]>()
-  if (state.status === 'ready') {
-    for (const e of state.data) months.set(e.date.slice(0, 7), [...(months.get(e.date.slice(0, 7)) ?? []), e])
+  // Older pages are appended on request: the archive can grow forever without one huge query.
+  const [older, setOlder] = useState<EditionSummary[]>([])
+  const [cursor, setCursor] = useState<string | null | undefined>(undefined)
+  const [more, setMore] = useState<'idle' | 'loading' | 'error'>('idle')
+  const first = state.status === 'ready' ? state.data : null
+  const editions = first ? [...first.items, ...older] : []
+  const nextCursor = cursor === undefined ? (first?.nextCursor ?? null) : cursor
+
+  async function loadMore() {
+    setMore('loading')
+    try {
+      const page = await publicRepo.archive(nextCursor)
+      setOlder((o) => [...o, ...page.items])
+      setCursor(page.nextCursor)
+      setMore('idle')
+    } catch {
+      setMore('error')
+    }
   }
+
+  const months = new Map<string, EditionSummary[]>()
+  for (const e of editions) months.set(e.date.slice(0, 7), [...(months.get(e.date.slice(0, 7)) ?? []), e])
 
   return (
     <>
       <SiteHeader />
       <main>
-        {state.status === 'ready' && state.data.some((e) => e.isDemo) && <DemoNotice />}
+        {editions.some((e) => e.isDemo) && <DemoNotice />}
         <section className={`${wrap} pb-10 pt-8 sm:pt-12 lg:pb-14 lg:pt-20`}>
           <p className="label flex items-center gap-2.5 text-forest">
             <span className="size-2 bg-forest" aria-hidden="true" />
@@ -85,14 +104,14 @@ export function ArchivePage() {
             }
           />
         )}
-        {state.status === 'ready' && state.data.length === 0 && <PageMessage title="Nothing here yet.">The first edition is on its way.</PageMessage>}
+        {first && editions.length === 0 && <PageMessage title="Nothing here yet.">The first edition is on its way.</PageMessage>}
 
         <div className={`${wrap} pb-20 lg:pb-28`}>
           {[...months].map(([month, editions]) => (
             <section key={month} aria-labelledby={`m-${month}`} className="mt-6 first:mt-0">
               <h2 id={`m-${month}`} className="label flex items-center justify-between bg-forest px-3 py-2.5 text-chalk">
                 <span>{formatMonthYear(`${month}-01`)}</span>
-                <span className="tabular-nums text-sage">
+                <span className="tabular-nums text-sage-light">
                   {editions.length} {editions.length === 1 ? 'edition' : 'editions'}
                 </span>
               </h2>
@@ -103,6 +122,18 @@ export function ArchivePage() {
               </ul>
             </section>
           ))}
+          {nextCursor && (
+            <div className="mt-10 text-center">
+              <button type="button" className="btn" onClick={loadMore} disabled={more === 'loading'}>
+                {more === 'loading' ? 'Loading…' : 'Load earlier editions'}
+              </button>
+              {more === 'error' && (
+                <p role="alert" className="mt-3 text-[0.875rem] text-earth">
+                  We couldn’t load more editions. Please try again.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </main>
       <SiteFooter />

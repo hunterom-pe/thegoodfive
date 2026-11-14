@@ -1,6 +1,6 @@
 import { demoStore } from '../data/demoStore'
 import { IS_DEMO } from '../lib/config'
-import type { Category, EditionStatus, EditorEdition, EditorEditionSummary, EditorStory, NewStory, StoryPatch, StoryRole } from '../lib/types'
+import type { Category, EditionStatus, EditorEdition, EditorEditionSummary, EditorStory, ImageCandidate, ImageKind, NewStory, StoryPatch, StoryRole } from '../lib/types'
 import type { Lineup } from './lineup'
 import { supabase } from './supabaseClient'
 
@@ -27,6 +27,8 @@ export interface EditorRepo {
   addStory(editionId: string, story: NewStory): Promise<void>
   /** Ask the server to find, screen and write today's draft. Resolves when the run finishes. */
   generate(): Promise<GenerateOutcome>
+  /** Tell the photo provider (Unsplash requires this) that an editor chose a photo. Best effort. */
+  trackImageUse(storyId: string): Promise<void>
   /** Permanently remove a story that has already been rejected. */
   deleteStory(editionId: string, storyId: string): Promise<void>
 }
@@ -73,6 +75,7 @@ const demoRepo: EditorRepo = {
   async deleteStory(editionId, storyId) {
     demoStore.deleteStory(editionId, storyId)
   },
+  async trackImageUse() {},
   async generate() {
     throw new Error('Generating a draft needs Supabase and the Netlify functions. It isn’t available in demo mode.')
   },
@@ -97,6 +100,11 @@ interface StoryRow {
   image_credit: string | null
   image_license: string | null
   image_rights_confirmed: boolean
+  image_kind: ImageKind | null
+  image_source: string | null
+  image_source_url: string | null
+  image_credit_url: string | null
+  image_candidates: unknown
   original_title: string | null
   original_excerpt: string | null
   discovered_via: string | null
@@ -121,6 +129,11 @@ const fromRow = (r: StoryRow): EditorStory => ({
   imageCredit: r.image_credit,
   imageLicense: r.image_license,
   imageRightsConfirmed: r.image_rights_confirmed,
+  imageKind: r.image_kind ?? null,
+  imageSource: r.image_source ?? null,
+  imageSourceUrl: r.image_source_url ?? null,
+  imageCreditUrl: r.image_credit_url ?? null,
+  imageCandidates: Array.isArray(r.image_candidates) ? (r.image_candidates as ImageCandidate[]) : [],
   originalTitle: r.original_title,
   originalExcerpt: r.original_excerpt,
   discoveredVia: r.discovered_via,
@@ -140,6 +153,11 @@ const COLUMN: Record<keyof StoryPatch, string> = {
   imageCredit: 'image_credit',
   imageLicense: 'image_license',
   imageRightsConfirmed: 'image_rights_confirmed',
+  imageKind: 'image_kind',
+  imageSource: 'image_source',
+  imageSourceUrl: 'image_source_url',
+  imageCreditUrl: 'image_credit_url',
+  imageCandidates: 'image_candidates',
 }
 
 function check(error: { message: string } | null) {
@@ -217,6 +235,18 @@ const supabaseRepo: EditorRepo = {
     const { error } = await supabase!.rpc('delete_story', { p_story: storyId })
     check(error)
   },
+  async trackImageUse(storyId) {
+    try {
+      const { data: session } = await supabase!.auth.getSession()
+      await fetch('/.netlify/functions/editor-image-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session?.access_token ?? ''}` },
+        body: JSON.stringify({ storyId }),
+      })
+    } catch {
+      /* the notice is a courtesy to the photo provider; never block editing on it */
+    }
+  },
   async generate() {
     const { data: session } = await supabase!.auth.getSession()
     let res: Response
@@ -234,7 +264,8 @@ const supabaseRepo: EditorRepo = {
     if (!res.ok || !body.runId || !body.date) throw new Error(body.message ?? `Generation could not be started (${res.status}).`)
 
     // The work runs in the background; watch its run record until it finishes.
-    const deadline = Date.now() + 12 * 60_000
+    // Netlify background functions may run for 15 minutes; the job stops itself at 13 (see store.ts), so wait a little longer than that.
+    const deadline = Date.now() + 16 * 60_000
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 4000))
       const { data: run, error } = await supabase!.from('discovery_runs').select('status, error').eq('id', body.runId).single()
@@ -246,7 +277,7 @@ const supabaseRepo: EditorRepo = {
       }
       return { status: run.status as 'skipped' | 'failed', message: (run.error as string | null) ?? 'The run ended without a draft.' }
     }
-    return { status: 'failed', message: 'This is taking longer than expected. Check the editions list in a few minutes.' }
+    return { status: 'failed', message: 'This is taking longer than expected. The run may still finish: check the editions list in a few minutes.' }
   },
 }
 

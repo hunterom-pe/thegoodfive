@@ -14,7 +14,7 @@ function Row({ edition }: { edition: EditorEditionSummary }) {
       <Link to={`/editor/${edition.id}`} className="flex min-h-16 items-center justify-between gap-4 py-4 hover:bg-mist/60 sm:px-3">
         <span>
           <span className="display block text-[1.25rem] !leading-tight">{formatLong(edition.date)}</span>
-          <span className={`mt-1 block text-[0.8125rem] ${complete ? 'text-ink/60' : 'font-semibold text-earth'}`}>
+          <span className={`mt-1 block text-[0.8125rem] ${complete ? 'text-ink/70' : 'font-semibold text-earth'}`}>
             {edition.primaryCount} of 5 stories · {edition.backupCount} {edition.backupCount === 1 ? 'backup' : 'backups'}
           </span>
         </span>
@@ -152,7 +152,7 @@ export function EditorDashboard() {
                 ))}
               </ul>
             ) : (
-              <p className="py-5 text-[0.9375rem] text-ink/60">Nothing to review. The next draft arrives with tomorrow’s discovery run.</p>
+              <p className="py-5 text-[0.9375rem] text-ink/70">Nothing to review. The next draft arrives with tomorrow’s discovery run.</p>
             )}
           </section>
 
@@ -168,7 +168,7 @@ export function EditorDashboard() {
                 ))}
               </ul>
             ) : (
-              <p className="py-5 text-[0.9375rem] text-ink/60">No editions have been published yet.</p>
+              <p className="py-5 text-[0.9375rem] text-ink/70">No editions have been published yet.</p>
             )}
           </section>
         </>

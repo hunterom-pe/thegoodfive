@@ -20,4 +20,11 @@ describe('dates', () => {
     expect(isISODate('2026-13-45')).toBe(false)
     expect(isISODate('yesterday')).toBe(false)
   })
+  it('rejects impossible calendar days that look valid', () => {
+    for (const bad of ['2026-02-30', '2026-02-29', '2026-04-31', '2026-06-31', '2026-00-10', '2026-01-00', '2026-1-5', '26-01-01']) expect(isISODate(bad), bad).toBe(false)
+  })
+  it('accepts real edge days, including leap day', () => {
+    for (const ok of ['2028-02-29', '2026-02-28', '2026-12-31', '2026-01-01', '2000-02-29']) expect(isISODate(ok), ok).toBe(true)
+    expect(isISODate('1900-02-29')).toBe(false)
+  })
 })

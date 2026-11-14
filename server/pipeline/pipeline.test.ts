@@ -176,7 +176,7 @@ describe('full pipeline with a fake AI', () => {
   })
   it('makes exactly two AI calls and returns five plus three', async () => {
     const calls: string[] = []
-    const result = await runPipeline({ ai: fakeAi(calls), today: '2026-11-13', now: new Date(NOW), discover: async () => pool, fetchMaterial: async () => ({ siteName: null, description: null, text: 'Article body. '.repeat(60) }) })
+    const result = await runPipeline({ ai: fakeAi(calls), today: '2026-11-13', now: new Date(NOW), discover: async () => pool, fetchMaterial: async () => ({ siteName: null, description: null, images: [], text: 'Article body. '.repeat(60) }) })
     expect(calls).toEqual(['screening', 'edition'])
     expect(result.stats).toMatchObject({ discovered: 30, primary: 5, backup: 3 })
     expect(result.stats.screened).toBeGreaterThan(20)

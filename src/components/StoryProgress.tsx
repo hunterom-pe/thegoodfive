@@ -42,7 +42,7 @@ export function StoryProgress({ count = 5 }: { count?: number }) {
             href={`#story-${n}`}
             aria-label={`Story ${n} of ${count}`}
             aria-current={n === reached ? 'true' : undefined}
-            className="grid h-11 w-[1.125rem] place-items-center"
+            className="grid h-11 w-5 place-items-center"
           >
             <span
               className={`size-2 border border-forest transition-colors duration-300 ${filled ? 'bg-forest' : 'bg-transparent'} ${n === reached ? 'scale-125' : ''}`}

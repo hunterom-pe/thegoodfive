@@ -14,10 +14,42 @@ export function StoryMeta({ story, total = 5, className = '' }: { story: PublicS
     <p className={`label flex items-center gap-2.5 text-forest ${className}`}>
       <span className="size-2 bg-forest" aria-hidden="true" />
       <span className="tabular-nums">
-        {two(story.position)} <span className="text-sage">/</span> {two(total)}
+        {two(story.position)} <span className="text-sage-deep">/</span> {two(total)}
       </span>
       <span className="h-px w-5 bg-sage" aria-hidden="true" />
       <span className="text-earth">{CATEGORIES[story.category].label}</span>
+    </p>
+  )
+}
+
+const UNSPLASH = 'https://unsplash.com/?utm_source=thegoodfive&utm_medium=referral'
+const safe = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null)
+
+/**
+ * Who took the photo, and what kind of photo it is. A representative photo is
+ * always labelled illustrative so it is never mistaken for the reported event.
+ * For Unsplash we credit the photographer and Unsplash, with links, as its API guidelines require.
+ */
+function PhotoCredit({ story }: { story: PublicStory }) {
+  const link = 'link-quiet font-semibold text-ink'
+  const credit = story.imageCredit
+  const creditUrl = safe(story.imageCreditUrl)
+  const onUnsplash = Boolean(story.imageSourceUrl?.includes('unsplash.com'))
+  const name = credit ? creditUrl ? <a href={creditUrl} target="_blank" rel="noopener noreferrer" className={link}>{credit}</a> : <span className="font-semibold text-ink">{credit}</span> : null
+  return (
+    <p className="mt-2 text-[0.8125rem] leading-relaxed text-ink/70">
+      {story.imageKind === 'illustrative' ? 'Illustrative photo' : 'Photo'}
+      {name && <> by {name}</>}
+      {onUnsplash && (
+        <>
+          {' '}
+          on{' '}
+          <a href={UNSPLASH} target="_blank" rel="noopener noreferrer" className={link}>
+            Unsplash
+          </a>
+        </>
+      )}
+      {story.imageKind === 'illustrative' && <>. Representative, not from the reported event.</>}
     </p>
   )
 }
@@ -40,9 +72,9 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
             <time dateTime={story.sourcePublishedAt.slice(0, 10)}>{formatShort(story.sourcePublishedAt)}</time>
           </>
         )}
-        {story.imageUrl && story.imageCredit && <> · Photo: {story.imageCredit}</>}
         {isDemo && <span className="label ml-2 border border-earth/50 px-1.5 py-0.5 text-[0.5625rem] text-earth">Sample</span>}
       </p>
+      {story.imageUrl && <PhotoCredit story={story} />}
       {isDemo || !/^https?:\/\//i.test(story.sourceUrl) ? (
         <Link to="/about#demo" className={linkClass}>
           <span className="link-quiet">About this sample story</span>
@@ -61,12 +93,25 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
   )
 }
 
-/** Unsplash can resize on the fly; give phones a phone-sized file. */
-function responsive(url: string): { srcSet?: string } {
-  if (!url.startsWith('https://images.unsplash.com/')) return {}
-  const at = (w: number) => `${url.replace(/([?&])w=\d+/, `$1w=${w}`)} ${w}w`
-  return { srcSet: [480, 800, 1200, 1800].map(at).join(', ') }
+/**
+ * Unsplash serves any width on demand. We add size, format and quality, and keep
+ * every other parameter (including ixid, which Unsplash requires us to preserve).
+ */
+export function sizedImage(url: string, width: number): string {
+  try {
+    const u = new URL(url)
+    if (u.hostname !== 'images.unsplash.com') return url
+    u.searchParams.set('w', String(width))
+    u.searchParams.set('auto', 'format')
+    u.searchParams.set('fit', 'crop')
+    u.searchParams.set('q', '72')
+    return u.toString()
+  } catch {
+    return url
+  }
 }
+
+const responsive = (url: string): { srcSet?: string } => (url.includes('images.unsplash.com') ? { srcSet: [480, 800, 1200, 1800].map((w) => `${sizedImage(url, w)} ${w}w`).join(', ') } : {})
 
 export function StoryFigure({
   story,
@@ -89,10 +134,10 @@ export function StoryFigure({
     <div className={`relative overflow-hidden bg-mist ${ratio} ${className}`}>
       {showPhoto ? (
         <img
-          src={story.imageUrl!}
+          src={sizedImage(story.imageUrl!, 1200)}
           {...responsive(story.imageUrl!)}
           sizes={sizes}
-          alt={story.imageAlt ?? ''}
+          alt={story.imageAlt || (story.imageKind === 'illustrative' ? 'Illustrative photo' : '')}
           loading={eager ? 'eager' : 'lazy'}
           fetchPriority={eager ? 'high' : undefined}
           decoding="async"

@@ -46,7 +46,7 @@ export function EditionHero({ edition, context }: { edition: PublicEdition; cont
           <p className="label flex flex-wrap items-center gap-x-2.5 gap-y-1 text-earth">
             <span className="size-2 bg-forest" aria-hidden="true" />
             <span className="text-forest">{text.kicker}</span>
-            <span className="h-px w-5 bg-sage" aria-hidden="true" />
+            <span className="h-px w-5 bg-sage max-sm:hidden" aria-hidden="true" />
             <time dateTime={edition.date}>{formatLong(edition.date)}</time>
           </p>
           <h1 className="display mt-5 text-[2.875rem] sm:text-[4rem] lg:text-[5.75rem] lg:leading-[0.96]">{text.title}</h1>

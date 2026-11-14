@@ -1,6 +1,7 @@
 import { fetchArticle, type ArticleMaterial } from './article.ts'
 import type { AiClient } from './ai.ts'
-import { assemble, rank, screen, write, type Shortlisted } from './curate.ts'
+import { assemble, imagePlans, rank, screen, write, type Shortlisted } from './curate.ts'
+import { attachImages, type ImageOptions } from './images.ts'
 import { dedupe, withinWindow } from './dedupe.ts'
 import { FEEDS, GDELT_QUERIES } from './feeds.ts'
 import { fetchGdelt } from './gdelt.ts'
@@ -21,6 +22,8 @@ export interface PipelineOptions {
   /** Overridable for tests. */
   discover?: (log: (line: string) => void) => Promise<Candidate[]>
   fetchMaterial?: (url: string) => Promise<ArticleMaterial | null>
+  /** Photo settings. Without an Unsplash key only the article's own image is offered, unapproved. */
+  images?: ImageOptions
 }
 
 export interface PipelineResult {
@@ -122,7 +125,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   // 3. Read the shortlisted stories (robots.txt respected) and drop any we can't support.
   const fetchMaterial = options.fetchMaterial ?? fetchArticle
-  const withMaterial = await mapLimit(ranked, 5, async (r): Promise<Shortlisted> => ({ ...r, material: materialFor(r.candidate, await fetchMaterial(r.candidate.url)) }))
+  const withMaterial = await mapLimit(ranked, 5, async (r): Promise<Shortlisted> => {
+    const article = await fetchMaterial(r.candidate.url)
+    return { ...r, material: materialFor(r.candidate, article), images: article?.images ?? [] }
+  })
   const shortlist = withMaterial.filter((s) => s.material.length >= MIN_MATERIAL_CHARS).map((s) => ({ ...s, material: s.material.slice(0, 3000) }))
   stats.withSourceText = shortlist.length
   log(`${shortlist.length} of ${ranked.length} had enough source text to summarise`)
@@ -133,9 +139,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const t1 = Date.now()
   const written = await write(options.ai, shortlist, options.today)
   log(`Writing took ${Math.round((Date.now() - t1) / 1000)}s`)
-  const stories = assemble(written, shortlist, log)
+  const drafted = assemble(written, shortlist, log)
+  const sources = new Map(shortlist.map((s) => [s.candidate.url, { candidate: s.candidate, hints: s.images ?? [] }]))
+  const stories = await attachImages(drafted, sources, imagePlans(written, shortlist), { log, ...options.images })
   stats.primary = stories.filter((s) => s.role === 'primary').length
   stats.backup = stories.filter((s) => s.role === 'backup').length
-  log(`Drafted ${stats.primary} primary and ${stats.backup} backup stories`)
+  stats.withImage = stories.filter((s) => s.image_url).length
+  stats.imageApproved = stories.filter((s) => s.image_rights_confirmed).length
+  log(`Drafted ${stats.primary} primary and ${stats.backup} backup stories; ${stats.withImage} with a photo, ${stats.imageApproved} licensed and cleared`)
   return { stories, stats }
 }

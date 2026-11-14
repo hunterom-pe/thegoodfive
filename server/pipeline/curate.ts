@@ -1,4 +1,5 @@
 import type { AiClient } from './ai.ts'
+import type { ImageHint } from './article.ts'
 import { truncate } from './text.ts'
 import { CATEGORIES, type Candidate, type Category, type DraftStory, type Evaluation } from './types.ts'
 
@@ -95,7 +96,9 @@ Writing rules (strict):
 - Headline: clear, specific, under 90 characters, no clickbait, no exclamation marks, no question headlines.
 - Summary: 60 to 100 words, plain prose, a single paragraph, in your own words (do not copy sentences from the source).
 - why_good_news: one sentence on why this counts as good news.
-- claims_to_check: 1 to 3 specific claims from your text that a human should verify against the original.`
+- claims_to_check: 1 to 3 specific claims from your text that a human should verify against the original.
+- image_query: 2 to 5 words describing a concrete, visual scene that would illustrate this story's actual subject, for a stock-photo search (for example "coral reef fish underwater", "seedlings planted forest restoration", "laboratory microscope research", "solar panels field"). Describe things, places, materials or activities. Never use a person's name, an organisation or a brand, and avoid words like portrait, face or celebrity.
+- about_specific_person: true when the story is mainly about one named individual (their case, recovery, achievement). Then image_query must describe a setting or object linked to the subject matter and must not call for people at all, so that no stranger's photo is mistaken for them.`
 
 const WRITE_SCHEMA = {
   type: 'object',
@@ -108,7 +111,7 @@ const WRITE_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'role', 'category', 'headline', 'summary', 'why_good_news', 'preliminary', 'claims_to_check'],
+        required: ['id', 'role', 'category', 'headline', 'summary', 'why_good_news', 'preliminary', 'claims_to_check', 'image_query', 'about_specific_person'],
         properties: {
           id: { type: 'string' },
           role: { type: 'string', enum: ['primary', 'backup'] },
@@ -118,6 +121,8 @@ const WRITE_SCHEMA = {
           why_good_news: { type: 'string' },
           preliminary: { type: 'boolean' },
           claims_to_check: { type: 'array', items: { type: 'string' } },
+          image_query: { type: 'string' },
+          about_specific_person: { type: 'boolean' },
         },
       },
     },
@@ -129,9 +134,11 @@ export interface Shortlisted {
   evaluation: Evaluation
   /** Text retrieved from the publisher: the only factual basis for the summary. */
   material: string
+  /** The article's own image(s), as candidates only. */
+  images?: ImageHint[]
 }
 
-interface WrittenStory {
+export interface WrittenStory {
   id: string
   role: 'primary' | 'backup'
   category: Category
@@ -140,6 +147,8 @@ interface WrittenStory {
   why_good_news: string
   preliminary: boolean
   claims_to_check: string[]
+  image_query?: string
+  about_specific_person?: boolean
 }
 
 export async function write(ai: AiClient, shortlist: Shortlisted[], today: string): Promise<WrittenStory[]> {
@@ -191,6 +200,23 @@ export function ungroundedNumbers(text: string, material: string): string[] {
  * Turn the model's answer into storable stories. Anything that fails a check
  * is excluded rather than repaired: the model could not support it.
  */
+export interface ImagePlanEntry {
+  query: string
+  aboutPerson: boolean
+}
+
+/** The photo search terms the writer proposed, keyed by each story's source URL. */
+export function imagePlans(written: WrittenStory[], shortlist: Shortlisted[]): Map<string, ImagePlanEntry> {
+  const byId = new Map(shortlist.map((s) => [s.candidate.id, s]))
+  const plans = new Map<string, ImagePlanEntry>()
+  for (const w of written) {
+    const source = byId.get(w.id)
+    const query = (w.image_query ?? '').replace(/[^\p{L}\p{N}\s'-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+    if (source && query) plans.set(source.candidate.url, { query, aboutPerson: Boolean(w.about_specific_person) })
+  }
+  return plans
+}
+
 export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log: (line: string) => void = () => {}): DraftStory[] {
   const byId = new Map(shortlist.map((s) => [s.candidate.id, s]))
   const seen = new Set<string>()

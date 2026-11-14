@@ -1,5 +1,6 @@
 export type EditionStatus = 'draft' | 'review' | 'published'
 export type StoryRole = 'primary' | 'backup' | 'rejected'
+export type ImageKind = 'original' | 'illustrative'
 export type Category = 'humanity' | 'health' | 'science' | 'nature' | 'progress'
 
 /** What a reader sees. Nothing editorial-only lives on this shape. */
@@ -16,6 +17,13 @@ export interface PublicStory {
   imageUrl: string | null
   imageAlt: string | null
   imageCredit: string | null
+  /** 'illustrative' = a representative photo, not a picture of the reported event. */
+  imageKind: ImageKind | null
+  imageLicense: string | null
+  /** The photo's own page, for attribution links. */
+  imageSourceUrl: string | null
+  /** The photographer's (or publisher's) page, for attribution links. */
+  imageCreditUrl: string | null
 }
 
 export interface PublicEdition {
@@ -35,13 +43,33 @@ export interface EditionSummary {
 }
 
 /** The editor's view of a story: public fields plus research and review data. */
+/** A photo the editor can choose for a story. Stored as JSON on the story. */
+export interface ImageCandidate {
+  url: string
+  alt: string | null
+  kind: ImageKind
+  /** og:image | twitter:image | json-ld | rss | unsplash */
+  source: string
+  credit: string | null
+  creditUrl: string | null
+  license: string | null
+  sourceUrl: string | null
+}
+
 export interface EditorStory extends Omit<PublicStory, 'position'> {
   editionId: string
   role: StoryRole
   /** 1–5 for the edition's five, 1–n for backups, null once rejected. */
   position: number | null
   imageLicense: string | null
-  /** Images only reach readers once the editor has confirmed usage rights. */
+  imageKind: ImageKind | null
+  /** Where the selected image came from: og:image, unsplash, manual... */
+  imageSource: string | null
+  imageSourceUrl: string | null
+  imageCreditUrl: string | null
+  /** Other photos to choose from, e.g. the article's own image (never auto-approved). */
+  imageCandidates: ImageCandidate[]
+  /** Images only reach readers once approved: by the editor, or by a licensed provider's terms. */
   imageRightsConfirmed: boolean
   originalTitle: string | null
   originalExcerpt: string | null
@@ -81,6 +109,11 @@ export type StoryPatch = Partial<
     | 'imageAlt'
     | 'imageCredit'
     | 'imageLicense'
+    | 'imageKind'
+    | 'imageSource'
+    | 'imageSourceUrl'
+    | 'imageCreditUrl'
+    | 'imageCandidates'
     | 'imageRightsConfirmed'
   >
 >

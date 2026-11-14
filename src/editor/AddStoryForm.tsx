@@ -11,7 +11,7 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
     <label className="block">
       <span className="flex items-baseline justify-between gap-3">
         <span className="label text-earth">{label}</span>
-        {hint && <span className="text-[0.75rem] text-ink/60">{hint}</span>}
+        {hint && <span className="text-[0.75rem] text-ink/70">{hint}</span>}
       </span>
       <span className="mt-1.5 block">{children}</span>
     </label>
@@ -35,7 +35,7 @@ export function AddStoryForm({ primaryCount, backupCount, onAdd }: { primaryCoun
   const effectiveRole = role === 'primary' && !primaryOpen ? 'backup' : role
 
   if (!primaryOpen && !backupOpen) {
-    return <p className="mt-12 border border-dashed border-line p-4 text-[0.875rem] text-ink/60">The edition has five stories and three backups. Reject or swap one to make room for another.</p>
+    return <p className="mt-12 border border-dashed border-line p-4 text-[0.875rem] text-ink/70">The edition has five stories and three backups. Reject or swap one to make room for another.</p>
   }
 
   async function submit(e: FormEvent) {
@@ -117,7 +117,7 @@ export function AddStoryForm({ primaryCount, backupCount, onAdd }: { primaryCoun
           </div>
           <details className="border-t border-line pt-4">
             <summary className="label flex min-h-11 cursor-pointer items-center text-forest">Photograph (optional)</summary>
-            <p className="text-[0.8125rem] leading-relaxed text-ink/60">A preview image on a news site is not permission to reuse it. Without confirmed rights, readers see the square composition instead.</p>
+            <p className="text-[0.8125rem] leading-relaxed text-ink/70">A preview image on a news site is not permission to reuse it. Without confirmed rights, readers see the square composition instead.</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <Field label="Image URL">
                 <input type="url" inputMode="url" placeholder="https://" className="field" value={f.imageUrl} onChange={set('imageUrl')} />

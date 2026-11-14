@@ -51,7 +51,17 @@ How a run works (`server/pipeline/`):
 6. **Verify in code**: a quotation that isn't in the source drops the story; a figure that isn't in the source is flagged under "Claims to verify"; preliminary research is flagged.
 7. **Save** through `create_draft_edition`, which fills an empty draft or creates one, and does nothing if the edition is published or already has stories.
 
-Two AI calls per run, at most 4 runs per date, one run at a time. Images are never taken from publishers; stories use the square-composition fallback unless you add a photo you have rights to.
+Two AI calls per run, at most 4 runs per date, one run at a time.
+
+### Photography
+Each drafted story gets an image decision, and **nothing reaches readers unapproved**:
+- **The article's own image** (Open Graph, Twitter card, JSON-LD, or the feed's media field) is stored as a *candidate* with its origin. Finding it grants no right to publish it: it is never auto-approved (a database function enforces this), and shows as **NOT APPROVED** in the editor until you confirm you have permission.
+- **A licensed photo from Unsplash** is chosen from a search the writer-AI proposes from the story's actual subject (never a person's name; for stories about a specific person it avoids people entirely). It is labelled *Illustrative photo* with credit to the photographer and Unsplash, and cleared because Unsplash's licence covers that photo.
+- **Otherwise** the story keeps the geometric artwork.
+
+Unsplash rules followed (checked November 2026): hotlinked URLs with `ixid` kept; photographer and Unsplash credited with `utm_source=thegoodfive&utm_medium=referral` links; the download endpoint is called when a photo is chosen (by the pipeline, and by `editor-image-download` when you pick another Unsplash photo in the editor). Their guidelines ask for a "non-automated" experience: every edition is reviewed and published by a person. Once the site is live, apply for production access in your Unsplash app (free) to lift the 50/hour demo limit.
+
+Setup: run `supabase/migrations/20261114000000_image_provenance.sql`, then add `UNSPLASH_ACCESS_KEY` (see `.env.example`) locally and on Netlify.
 
 **Entry points**
 - **Generate Today's Five** button on the editor dashboard → `netlify/functions/editor-generate` (verifies your login and editor status on the server) → `generate-draft-background` (up to 15 min).

@@ -12,8 +12,14 @@ export function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** A real calendar day. "2026-02-30" has the right shape but is not a date, and some engines quietly roll it into March. */
 export function isISODate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`))
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!m) return false
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const d = new Date(0)
+  d.setUTCFullYear(year, month - 1, day)
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
 }
 
 function fmt(date: string, options: Intl.DateTimeFormatOptions): string {
