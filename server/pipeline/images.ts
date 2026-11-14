@@ -64,6 +64,10 @@ export async function attachImages(
   const out: DraftStory[] = []
 
   for (const story of stories) {
+    if (story.role === 'rejected') {
+      out.push(story)
+      continue
+    }
     const source = sources.get(story.source_url)
     const plan = plans.get(story.source_url)
     const candidates: StoredImageCandidate[] = []

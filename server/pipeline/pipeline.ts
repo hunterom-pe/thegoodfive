@@ -2,6 +2,9 @@ import { fetchArticle, type ArticleMaterial } from './article.ts'
 import type { AiClient } from './ai.ts'
 import { assemble, imagePlans, rank, screen, write, type Shortlisted } from './curate.ts'
 import { attachImages, type ImageOptions } from './images.ts'
+import { applyGates } from './lineup.ts'
+import { normalizeUrl } from './dedupe.ts'
+import { trustedDomains } from './sources.ts'
 import { dedupe, withinWindow } from './dedupe.ts'
 import { FEEDS, GDELT_QUERIES } from './feeds.ts'
 import { fetchGdelt } from './gdelt.ts'
@@ -22,6 +25,8 @@ export interface PipelineOptions {
   /** Overridable for tests. */
   discover?: (log: (line: string) => void) => Promise<Candidate[]>
   fetchMaterial?: (url: string) => Promise<ArticleMaterial | null>
+  /** Extra trusted publisher domains (comma separated), on top of the built-in list. */
+  extraTrustedDomains?: string
   /** Photo settings. Without an Unsplash key only the article's own image is offered, unapproved. */
   images?: ImageOptions
 }
@@ -139,7 +144,13 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const t1 = Date.now()
   const written = await write(options.ai, shortlist, options.today)
   log(`Writing took ${Math.round((Date.now() - t1) / 1000)}s`)
-  const drafted = assemble(written, shortlist, log)
+  const drafts = assemble(written, shortlist, log, { maxBackups: 5 })
+  // Deterministic fact-checking against the retrieved source text. Failures are rejected, never scored.
+  const gated = applyGates(drafts, { now: new Date(now), recentUrls: new Set((options.recentUrls ?? []).map(normalizeUrl)), trustedDomains: trustedDomains(options.extraTrustedDomains) })
+  stats.accepted = gated.accepted
+  stats.rejected = gated.rejected
+  for (const s of gated.stories.filter((x) => x.role === 'rejected')) log(`Rejected "${s.headline.slice(0, 50)}": ${s.rejected_reason}`)
+  const drafted = gated.stories
   const sources = new Map(shortlist.map((s) => [s.candidate.url, { candidate: s.candidate, hints: s.images ?? [] }]))
   const stories = await attachImages(drafted, sources, imagePlans(written, shortlist), { log, ...options.images })
   stats.primary = stories.filter((s) => s.role === 'primary').length

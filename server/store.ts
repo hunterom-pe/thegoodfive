@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
+import { webhookNotifier } from './alerts.ts'
 
 /** Server-side configuration. None of these are ever sent to a browser. */
 export function env() {
@@ -17,6 +18,9 @@ export function env() {
     aiBaseUrl: e.OPENAI_BASE_URL || 'https://api.openai.com/v1',
     secret: e.GENERATION_SECRET || '',
     timezone: e.EDITION_TIMEZONE || e.VITE_EDITION_TIMEZONE || 'America/Phoenix',
+    autoPublish: (e.AUTO_PUBLISH_ENABLED ?? '').trim().toLowerCase() === 'true',
+    alertWebhook: e.ALERT_WEBHOOK_URL || '',
+    extraTrusted: e.EXTRA_TRUSTED_DOMAINS || '',
     maxRunsPerDay: Number(e.MAX_RUNS_PER_DAY || 4),
     siteUrl: (e.URL || e.SITE_URL || 'http://localhost:8888').replace(/\/$/, ''),
   }
@@ -82,6 +86,10 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
   const stats: Record<string, unknown> = {}
   try {
     const c = env()
+    const { data: runRow } = await db.from('discovery_runs').select('trigger').eq('id', runId).single()
+    // Unsplash's API terms ask for non-automated use: only a run an editor started may search for photos.
+    // Scheduled runs leave images to the editor (their own photo search) or to the geometric artwork.
+    const personPresent = runRow?.trigger === 'manual'
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
     const { data: recent } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
@@ -92,9 +100,12 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('The run took longer than 13 minutes and was stopped. Try again, or use a faster AI model.')), RUN_DEADLINE_MS)
     })
-    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log, images: { unsplashKey: c.unsplashKey || undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
+    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
-    if (result.stories.length === 0) return await finish(db, runId, 'skipped', stats, 'No suitable stories were found. Nothing was saved.')
+    if (result.stories.length === 0) {
+      await webhookNotifier(c.alertWebhook)(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)
+      return await finish(db, runId, 'skipped', stats, 'No suitable stories were found. Nothing was saved.')
+    }
 
     const { data: editionId, error } = await db.rpc('create_draft_edition', { p_date: date, p_stories: result.stories })
     if (error) throw new Error(error.message)
@@ -103,6 +114,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     log(`Run failed: ${message}`)
+    await webhookNotifier(env().alertWebhook)(`Draft generation for ${date} failed: ${message.slice(0, 300)}`)
     await finish(db, runId, 'failed', stats, message.slice(0, 500))
   }
 }
@@ -135,4 +147,54 @@ export async function authenticateEditor(db: SupabaseClient, authorization: stri
   const { data: editor } = await db.from('editors').select('user_id').eq('user_id', auth.user.id).maybeSingle()
   if (!editor) return { ok: false, status: 403, message: 'This account is not an editor.' }
   return { ok: true, userId: auth.user.id }
+}
+
+// ── Publishing storage (Supabase) ──────────────────────────────────────────
+import type { PublishDecision, PublishRunRecord, PublishStore, StoredEdition, StoredStory } from './autopublish.ts'
+
+export function supabasePublishStore(db: SupabaseClient): PublishStore {
+  return {
+    async loadEdition(date) {
+      const { data, error } = await db
+        .from('editions')
+        .select('id, edition_date, status, stories(id, role, position, headline, summary, category, source_name, source_url, source_published_at, source_material, ai_rationale)')
+        .eq('edition_date', date)
+        .maybeSingle()
+      if (error) throw new Error(`Could not read the edition: ${error.message}`)
+      if (!data) return null
+      const rows = data.stories as Record<string, unknown>[]
+      return {
+        id: data.id as string,
+        date: data.edition_date as string,
+        status: data.status as StoredEdition['status'],
+        stories: rows.map((r): StoredStory => ({
+          id: r.id as string, role: r.role as StoredStory['role'], position: (r.position as number | null) ?? null,
+          headline: (r.headline as string) ?? '', summary: (r.summary as string) ?? '', category: r.category as string,
+          sourceName: (r.source_name as string) ?? '', sourceUrl: (r.source_url as string) ?? '',
+          sourcePublishedAt: (r.source_published_at as string | null) ?? null, sourceMaterial: (r.source_material as string | null) ?? null,
+          aiRationale: (r.ai_rationale as string | null) ?? null,
+        })),
+      }
+    },
+    async recentSourceUrls(date) {
+      const since = new Date(Date.parse(`${date}T12:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10)
+      const { data, error } = await db
+        .from('stories')
+        .select('source_url, editions!inner(edition_date, status)')
+        .eq('editions.status', 'published')
+        .gte('editions.edition_date', since)
+        .lt('editions.edition_date', date)
+      if (error) throw new Error(`Could not read recent editions: ${error.message}`)
+      return (data ?? []).map((r) => r.source_url as string)
+    },
+    async publish(editionId, date, primary, rejections): Promise<PublishDecision> {
+      const { data, error } = await db.rpc('auto_publish_edition', { p_edition: editionId, p_date: date, p_primary: primary, p_rejections: rejections })
+      if (error) throw new Error(error.message)
+      return data as PublishDecision
+    },
+    async record(run: PublishRunRecord) {
+      const { error } = await db.from('publish_runs').insert({ edition_date: run.date, status: run.status, trigger: run.trigger, reason: run.reason, details: run.details, finished_at: new Date().toISOString() })
+      if (error) throw new Error(error.message)
+    },
+  }
 }

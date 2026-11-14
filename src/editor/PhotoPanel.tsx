@@ -19,7 +19,7 @@ export const KIND_LABEL: Record<ImageKind, string> = {
 
 const CLEAR: StoryPatch = {
   imageUrl: null, imageAlt: null, imageCredit: null, imageCreditUrl: null, imageLicense: null,
-  imageKind: null, imageSource: null, imageSourceUrl: null, imageRightsConfirmed: false,
+  imageKind: null, imageSource: null, imageSourceUrl: null, imageRightsConfirmed: false, imageEditorApproved: false,
 }
 
 /** Switching to a candidate. A licensed provider's photo is cleared by its licence; a publisher's image never is. */
@@ -28,6 +28,8 @@ export function candidatePatch(c: ImageCandidate): StoryPatch {
     imageUrl: c.url, imageAlt: c.alt, imageCredit: c.credit, imageCreditUrl: c.creditUrl, imageLicense: c.license,
     imageKind: c.kind, imageSource: c.source, imageSourceUrl: c.sourceUrl,
     imageRightsConfirmed: c.source === 'unsplash',
+    // A person picked this photo, which is what Unsplash's terms ask for and what lets it appear in an automatically published edition.
+    imageEditorApproved: true,
   }
 }
 
@@ -59,6 +61,9 @@ export function PhotoPanel({
   set,
   onApply,
   busy,
+  imageDirty,
+  onSaveManual,
+  searchPhotos,
 }: {
   /** The saved story: status and provenance always reflect what is stored. */
   story: EditorStory
@@ -68,8 +73,29 @@ export function PhotoPanel({
   /** Save image changes immediately. */
   onApply: (patch: StoryPatch) => Promise<void>
   busy: boolean
+  /** Unsaved edits in the manual image fields. */
+  imageDirty: boolean
+  onSaveManual: () => Promise<void>
+  /** An editor's own photo search. Absent when searching is unavailable. */
+  searchPhotos?: (query: string) => Promise<ImageCandidate[]>
 }) {
   const [confirm, setConfirm] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ImageCandidate[] | null>(null)
+  const [searchState, setSearchState] = useState<'idle' | 'searching' | 'error'>('idle')
+  const [searchError, setSearchError] = useState('')
+  async function runSearch() {
+    if (!searchPhotos) return
+    setSearchState('searching')
+    setSearchError('')
+    try {
+      setResults(await searchPhotos(query))
+      setSearchState('idle')
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'Photo search failed.')
+      setSearchState('error')
+    }
+  }
   const [working, setWorking] = useState(false)
   const apply = async (patch: StoryPatch) => {
     setWorking(true)
@@ -139,9 +165,14 @@ export function PhotoPanel({
               </a>
             )}
 
+            {approved && !story.imageEditorApproved && licensedProvider && (
+              <p className="border-l-2 border-sage pl-3 text-[0.8125rem] text-ink/75">
+                Cleared by Unsplash’s licence, but not yet approved by you. If this edition publishes automatically, this photo is left out (Unsplash asks for a person to choose its photos). Approve it to keep it.
+              </p>
+            )}
             {approved ? (
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn btn-quiet" disabled={disabled} onClick={() => apply({ imageRightsConfirmed: false })}>
+                <button type="button" className="btn btn-quiet" disabled={disabled} onClick={() => apply({ imageRightsConfirmed: false, imageEditorApproved: false })}>
                   Withdraw approval
                 </button>
               </div>
@@ -156,7 +187,7 @@ export function PhotoPanel({
                   <input type="checkbox" className="size-5 accent-forest" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
                   I’ve confirmed we have the right to publish this image
                 </label>
-                <button type="button" className="btn btn-solid" disabled={disabled || !confirm} onClick={() => apply({ imageRightsConfirmed: true })}>
+                <button type="button" className="btn btn-solid" disabled={disabled || !confirm} onClick={() => apply({ imageRightsConfirmed: true, imageEditorApproved: true })}>
                   Approve for public use
                 </button>
               </div>
@@ -186,6 +217,52 @@ export function PhotoPanel({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {searchPhotos && (
+        <div className="mt-5 border-t border-line pt-4">
+          <p className="label text-earth">Find a licensed photo</p>
+          <p className="mt-1 text-[0.8125rem] text-ink/70">Search Unsplash yourself and choose the photo. Photos are labelled illustrative and credited automatically.</p>
+          <form
+            className="mt-2 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void runSearch()
+            }}
+          >
+            <input className="field min-w-0 flex-1" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. coral reef fish underwater" aria-label="Search for a photo" />
+            <button type="submit" className="btn" disabled={disabled || query.trim().length < 3 || searchState === 'searching'}>
+              {searchState === 'searching' ? 'Searching…' : 'Search'}
+            </button>
+          </form>
+          {searchState === 'error' && (
+            <p role="alert" className="mt-2 border-l-2 border-earth pl-3 text-[0.8125rem] text-earth">
+              {searchError}
+            </p>
+          )}
+          {results && results.length === 0 && <p className="mt-2 text-[0.8125rem] text-ink/70">No photos found. Try different words.</p>}
+          {results && results.length > 0 && (
+            <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+              {results.map((c) => (
+                <li key={c.url} className="flex gap-3 border border-line p-2">
+                  <Thumb url={c.url} alt={c.alt ?? ''} className="aspect-[3/2] w-24 shrink-0" />
+                  <div className="min-w-0 text-[0.8125rem] leading-snug">
+                    <p className="truncate font-semibold">{c.credit ?? 'Unsplash'}</p>
+                    <p className="line-clamp-2 text-ink/70">{c.alt}</p>
+                    <button
+                      type="button"
+                      className="mt-1 min-h-11 font-semibold text-forest underline underline-offset-4 disabled:opacity-40"
+                      disabled={disabled}
+                      onClick={() => apply({ ...candidatePatch(c), imageCandidates: [...story.imageCandidates.filter((x) => x.url !== c.url), c] })}
+                    >
+                      Use this photo
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -226,10 +303,15 @@ export function PhotoPanel({
           </Field>
         </div>
         <label className="mt-4 flex min-h-11 items-center gap-3 text-[0.9375rem]">
-          <input type="checkbox" className="size-5 accent-forest" checked={value.imageRightsConfirmed} disabled={!value.imageUrl} onChange={(e) => set('imageRightsConfirmed', e.target.checked)} />
+          <input type="checkbox" className="size-5 accent-forest" checked={value.imageRightsConfirmed} disabled={!value.imageUrl} onChange={(e) => {
+              set('imageRightsConfirmed', e.target.checked)
+              set('imageEditorApproved', e.target.checked)
+            }} />
           I’ve confirmed we have the right to publish this image
         </label>
-        <p className="mt-1 text-[0.75rem] text-ink/70">Save changes below to apply.</p>
+        <button type="button" className="btn mt-3" disabled={busy || !imageDirty} onClick={() => void onSaveManual()}>
+          Save image details
+        </button>
       </details>
     </div>
   )

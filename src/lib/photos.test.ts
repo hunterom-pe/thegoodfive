@@ -7,7 +7,7 @@ import type { EditionSummary, EditorEdition, EditorStory, ImageCandidate } from 
 const story = (position: number, over: Partial<EditorStory> = {}): EditorStory => ({
   id: `s${position}`, editionId: 'e', role: 'primary', position, category: 'nature', headline: `H${position}`, summary: 'S', sourceName: 'Paper', sourceUrl: 'https://e.org/a',
   sourcePublishedAt: null, imageUrl: null, imageAlt: null, imageCredit: null, imageLicense: null, imageKind: null, imageSource: null, imageSourceUrl: null, imageCreditUrl: null,
-  imageCandidates: [], imageRightsConfirmed: false, originalTitle: null, originalExcerpt: null, discoveredVia: null, aiRationale: null, claimsToCheck: [], rejectedReason: null, ...over,
+  imageCandidates: [], imageRightsConfirmed: false, imageEditorApproved: false, originalTitle: null, originalExcerpt: null, discoveredVia: null, aiRationale: null, claimsToCheck: [], rejectedReason: null, ...over,
 })
 const edition = (stories: EditorStory[]): EditorEdition => ({ id: 'e', date: '2026-11-13', status: 'published', publishedAt: '2026-11-13T07:00:00Z', isDemo: false, stories })
 

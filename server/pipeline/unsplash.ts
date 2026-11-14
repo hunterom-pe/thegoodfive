@@ -51,7 +51,7 @@ const tokens = (text: string) => new Set(text.toLowerCase().replace(/[^a-z0-9\s]
  * never chosen; and when the story is about a specific person, any photo
  * showing people is excluded.
  */
-export function rankPhotos(photos: UnsplashPhoto[], query: string, options: { aboutPerson: boolean; exclude?: Set<string> }): UnsplashPhoto[] {
+export function rankPhotos(photos: UnsplashPhoto[], query: string, options: { aboutPerson: boolean; exclude?: Set<string>; minOverlap?: number }): UnsplashPhoto[] {
   const wanted = tokens(query)
   return photos
     .filter((p) => !options.exclude?.has(p.id))
@@ -66,7 +66,7 @@ export function rankPhotos(photos: UnsplashPhoto[], query: string, options: { ab
     })
     // A photo must share at least one word with what the story is about. A merely
     // "related" result (a computer for a medical story) is worse than the artwork.
-    .filter(({ overlap }) => overlap >= 1)
+    .filter(({ overlap }) => overlap >= (options.minOverlap ?? 1))
     .sort((a, b) => b.score - a.score)
     .map(({ p }) => p)
 }

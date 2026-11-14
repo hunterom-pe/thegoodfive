@@ -25,7 +25,7 @@ function copy(context: EditionContext, date: string) {
         kicker: 'Latest edition',
         title: 'Good things are still happening.',
         sub: `Here are five from ${weekday}.`,
-        note: `Today’s edition is still with our editor. Until it’s ready, this is the most recent one, published on ${formatDayMonth(date)}.`,
+        note: `Today’s edition isn’t ready yet. Until it is, this is the most recent one, published on ${formatDayMonth(date)}.`,
       }
     case 'archive':
       return {

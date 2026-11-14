@@ -84,7 +84,7 @@ export function rank(candidates: Candidate[], evaluations: Evaluation[], now: nu
 
 const WRITE_SYSTEM = `You are the editor of The Good Five, a daily publication of five genuinely good news stories. Tone: warm, intelligent, grounded, optimistic without gushing. Journalistic, never clickbait, never generic AI phrasing.
 
-You receive up to 14 shortlisted stories, each with SOURCE MATERIAL retrieved from the publisher. Choose the best five (primary) and three backups (backup), then write each one. When at least eight stories are usable you MUST return exactly eight: five primary and three backup.
+You receive up to 14 shortlisted stories, each with SOURCE MATERIAL retrieved from the publisher. Choose the best five (primary) and up to five backups (backup), then write each one. When at least ten stories are usable return ten: five primary and five backup, best first. Every story will be fact-checked against its source by software, and any that fail are discarded, so the extra backups are what keep the edition whole.
 
 Selection: genuine positive impact, credibility, significance, freshness and variety of subject. Prefer meaningful progress over trivial or viral items. Do not force category quotas, but do not run five stories on the same kind of news if equally strong alternatives exist. If fewer than eight stories qualify, return only those that do (primary first); never pad the list. If the source material is too thin to summarise accurately, leave the story out.
 
@@ -93,7 +93,7 @@ Writing rules (strict):
 - Do not put quotation marks around anything unless the exact words appear in the source material.
 - Every number, percentage, date and name in your text must appear in the source material.
 - Distinguish confirmed results from preliminary research ("early findings", "in a small study", "researchers hope"). Set preliminary = true when the source describes early-stage, unreplicated or not-yet-peer-reviewed work. Never state medical conclusions more strongly than the source does.
-- Headline: clear, specific, under 90 characters, no clickbait, no exclamation marks, no question headlines.
+- Headline: clear, specific, under 90 characters, in sentence case (capitalise only the first word and proper nouns such as people, places and organisations), no clickbait, no exclamation marks, no question headlines.
 - Summary: 60 to 100 words, plain prose, a single paragraph, in your own words (do not copy sentences from the source).
 - why_good_news: one sentence on why this counts as good news.
 - claims_to_check: 1 to 3 specific claims from your text that a human should verify against the original.
@@ -107,7 +107,7 @@ const WRITE_SCHEMA = {
   properties: {
     stories: {
       type: 'array',
-      maxItems: 8,
+      maxItems: 10,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -165,7 +165,7 @@ export async function write(ai: AiClient, shortlist: Shortlisted[], today: strin
     user: `Today is ${today}. Shortlist:\n\n${JSON.stringify(items)}`,
     name: 'edition',
     schema: WRITE_SCHEMA,
-    maxTokens: 9000,
+    maxTokens: 12000,
   })
   return result.stories
 }
@@ -217,7 +217,7 @@ export function imagePlans(written: WrittenStory[], shortlist: Shortlisted[]): M
   return plans
 }
 
-export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log: (line: string) => void = () => {}): DraftStory[] {
+export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log: (line: string) => void = () => {}, options: { maxBackups?: number } = {}): DraftStory[] {
   const byId = new Map(shortlist.map((s) => [s.candidate.id, s]))
   const seen = new Set<string>()
   const accepted: { story: WrittenStory; source: Shortlisted; notes: string[] }[] = []
@@ -258,7 +258,7 @@ export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log:
   const queued = [...accepted.filter((a) => a.story.role === 'backup'), ...overflow]
   // If the model (or a failed check) left the five short, the best backups step up so the edition is whole.
   while (primaries.length < 5 && queued.length > 0) primaries.push(queued.shift()!)
-  const backups = queued.slice(0, 3)
+  const backups = queued.slice(0, options.maxBackups ?? 3)
 
   const toDraft = (a: (typeof accepted)[number], role: 'primary' | 'backup', position: number): DraftStory => ({
     role,
@@ -271,6 +271,7 @@ export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log:
     source_published_at: a.source.candidate.publishedAt,
     original_title: a.source.candidate.title,
     original_excerpt: truncate(a.source.material, 700),
+    source_material: a.source.material,
     discovered_via: a.source.candidate.via,
     ai_rationale: a.story.why_good_news,
     claims_to_check: [...a.story.claims_to_check.slice(0, 3), ...a.notes],

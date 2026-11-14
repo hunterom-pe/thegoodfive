@@ -9,6 +9,22 @@ import { supabase } from './supabaseClient'
  * purpose: the database decides what is allowed (see the migration), and
  * this file only asks.
  */
+/** What the dashboard shows about the automatic workflow. */
+export interface AutomationSnapshot {
+  /** From the server. Null when the server can't be asked (demo mode, or the function isn't reachable). */
+  config: { autoPublishEnabled: boolean; alertsConfigured: boolean; unsplashConfigured: boolean } | null
+  lastPublished: { date: string; publishedAt: string; automatic: boolean } | null
+  generation: { status: string; error: string | null; startedAt: string; trigger: string } | null
+  publication: { status: string; reason: string | null; startedAt: string; trigger: string; accepted: number; rejected: { headline: string; reasons: string[] }[] } | null
+  today: { status: string; primary: number; backup: number; rejected: { headline: string; reason: string }[] } | null
+}
+
+export interface PublishCheckReport {
+  status: string
+  reason: string
+  details: { accepted?: { headline: string; source: string }[]; rejected?: { headline: string; source: string; reasons: string[] }[]; warnings?: string[] }
+}
+
 export interface GenerateOutcome {
   status: 'succeeded' | 'skipped' | 'failed'
   message: string
@@ -27,6 +43,14 @@ export interface EditorRepo {
   addStory(editionId: string, story: NewStory): Promise<void>
   /** Ask the server to find, screen and write today's draft. Resolves when the run finishes. */
   generate(): Promise<GenerateOutcome>
+  /** Everything the Automation panel shows. */
+  automation(today: string): Promise<AutomationSnapshot>
+  /** Verify today's draft against every publication rule and report. Publishes nothing. */
+  checkPublish(): Promise<PublishCheckReport>
+  /** Change ONLY the image of a story, even on a published edition. The words stay locked. */
+  updateStoryImage(editionId: string, story: EditorStory, patch: StoryPatch): Promise<void>
+  /** An editor's own search for licensed photos (Unsplash asks for human-driven use). */
+  searchPhotos(query: string): Promise<ImageCandidate[]>
   /** Tell the photo provider (Unsplash requires this) that an editor chose a photo. Best effort. */
   trackImageUse(storyId: string): Promise<void>
   /** Permanently remove a story that has already been rejected. */
@@ -76,6 +100,32 @@ const demoRepo: EditorRepo = {
     demoStore.deleteStory(editionId, storyId)
   },
   async trackImageUse() {},
+  async automation() {
+    const edition = demoStore.editions().find((e) => e.status === 'draft')
+    return {
+      config: null,
+      lastPublished: (() => {
+        const p = demoStore.editions().filter((e) => e.status === 'published').sort((a, b) => b.date.localeCompare(a.date))[0]
+        return p ? { date: p.date, publishedAt: p.publishedAt ?? p.date, automatic: false } : null
+      })(),
+      generation: null,
+      publication: null,
+      today: edition ? { status: edition.status, primary: edition.stories.filter((s) => s.role === 'primary').length, backup: edition.stories.filter((s) => s.role === 'backup').length, rejected: [] } : null,
+    }
+  },
+  async checkPublish() {
+    throw new Error('Publish checks need Supabase and the Netlify functions. They are not available in demo mode.')
+  },
+  async updateStoryImage(editionId, story, patch) {
+    demoStore.updateImage(editionId, story.id, patch)
+  },
+  async searchPhotos(query) {
+    if (!query.trim()) return []
+    return [
+      { url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=72', alt: 'A sunlit path through tall woodland', kind: 'illustrative', source: 'unsplash', credit: 'Sample photographer', creditUrl: 'https://unsplash.com/', license: 'Unsplash License', sourceUrl: 'https://unsplash.com/' },
+      { url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=72', alt: 'Mountains above a misty valley', kind: 'illustrative', source: 'unsplash', credit: 'Sample photographer', creditUrl: 'https://unsplash.com/', license: 'Unsplash License', sourceUrl: 'https://unsplash.com/' },
+    ]
+  },
   async generate() {
     throw new Error('Generating a draft needs Supabase and the Netlify functions. It isn’t available in demo mode.')
   },
@@ -105,6 +155,7 @@ interface StoryRow {
   image_source_url: string | null
   image_credit_url: string | null
   image_candidates: unknown
+  image_editor_approved: boolean
   original_title: string | null
   original_excerpt: string | null
   discovered_via: string | null
@@ -134,6 +185,7 @@ const fromRow = (r: StoryRow): EditorStory => ({
   imageSourceUrl: r.image_source_url ?? null,
   imageCreditUrl: r.image_credit_url ?? null,
   imageCandidates: Array.isArray(r.image_candidates) ? (r.image_candidates as ImageCandidate[]) : [],
+  imageEditorApproved: r.image_editor_approved ?? false,
   originalTitle: r.original_title,
   originalExcerpt: r.original_excerpt,
   discoveredVia: r.discovered_via,
@@ -158,6 +210,7 @@ const COLUMN: Record<keyof StoryPatch, string> = {
   imageSourceUrl: 'image_source_url',
   imageCreditUrl: 'image_credit_url',
   imageCandidates: 'image_candidates',
+  imageEditorApproved: 'image_editor_approved',
 }
 
 function check(error: { message: string } | null) {
@@ -235,6 +288,64 @@ const supabaseRepo: EditorRepo = {
     const { error } = await supabase!.rpc('delete_story', { p_story: storyId })
     check(error)
   },
+  async updateStoryImage(_editionId, story, patch) {
+    const merged = { ...story, ...patch }
+    const { error } = await supabase!.rpc('set_story_image', {
+      p_story: story.id,
+      p_image: {
+        image_url: merged.imageUrl, image_alt: merged.imageAlt, image_credit: merged.imageCredit, image_credit_url: merged.imageCreditUrl,
+        image_license: merged.imageLicense, image_kind: merged.imageKind, image_source: merged.imageSource, image_source_url: merged.imageSourceUrl,
+        image_candidates: merged.imageCandidates, image_rights_confirmed: merged.imageRightsConfirmed, image_editor_approved: merged.imageEditorApproved,
+      },
+    })
+    check(error)
+  },
+  async searchPhotos(query) {
+    const { data: session } = await supabase!.auth.getSession()
+    let res: Response
+    try {
+      res = await fetch('/.netlify/functions/editor-photos', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session?.access_token ?? ''}` }, body: JSON.stringify({ query }) })
+    } catch {
+      throw new Error('Could not reach the server. Check your connection and try again.')
+    }
+    const body = (res.headers.get('content-type') ?? '').includes('json') ? ((await res.json()) as { message?: string; photos?: ImageCandidate[] }) : null
+    if (!body) throw new Error('Photo search runs as a Netlify function, so it only works on the deployed site or under `netlify dev`.')
+    if (!res.ok) throw new Error(body.message ?? `Photo search failed (${res.status}).`)
+    return body.photos ?? []
+  },
+  async automation(today) {
+    const [last, gen, pub, ed, config] = await Promise.all([
+      supabase!.from('editions').select('edition_date, published_at, published_by').eq('status', 'published').order('edition_date', { ascending: false }).limit(1).maybeSingle(),
+      supabase!.from('discovery_runs').select('status, error, started_at, trigger').eq('edition_date', today).order('started_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase!.from('publish_runs').select('status, reason, started_at, trigger, details').eq('edition_date', today).neq('status', 'dry_run').order('started_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase!.from('editions').select('status, stories(role, headline, rejected_reason)').eq('edition_date', today).maybeSingle(),
+      automationConfig(),
+    ])
+    // The publish log only exists once the Phase 5 migration has been run; until then show "hasn't run yet" instead of failing.
+    for (const r of [last, gen, ed]) check(r.error)
+    const stories = ((ed.data?.stories ?? []) as { role: StoryRole; headline: string; rejected_reason: string | null }[])
+    const details = (pub.data?.details ?? {}) as { accepted?: unknown[]; rejected?: { headline: string; reasons: string[] }[] }
+    return {
+      config,
+      lastPublished: last.data ? { date: last.data.edition_date as string, publishedAt: last.data.published_at as string, automatic: last.data.published_by === null } : null,
+      generation: gen.data ? { status: gen.data.status as string, error: (gen.data.error as string | null) ?? null, startedAt: gen.data.started_at as string, trigger: gen.data.trigger as string } : null,
+      publication: pub.data && !pub.error ? { status: pub.data.status as string, reason: (pub.data.reason as string | null) ?? null, startedAt: pub.data.started_at as string, trigger: pub.data.trigger as string, accepted: details.accepted?.length ?? 0, rejected: details.rejected ?? [] } : null,
+      today: ed.data ? { status: ed.data.status as string, primary: stories.filter((s) => s.role === 'primary').length, backup: stories.filter((s) => s.role === 'backup').length, rejected: stories.filter((s) => s.role === 'rejected').map((s) => ({ headline: s.headline, reason: s.rejected_reason ?? '' })) } : null,
+    }
+  },
+  async checkPublish() {
+    const { data: session } = await supabase!.auth.getSession()
+    let res: Response
+    try {
+      res = await fetch('/.netlify/functions/editor-automation', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session?.access_token ?? ''}` }, body: JSON.stringify({ action: 'check' }) })
+    } catch {
+      throw new Error('Could not reach the server. Check your connection and try again.')
+    }
+    const body = (res.headers.get('content-type') ?? '').includes('json') ? ((await res.json()) as Partial<PublishCheckReport> & { message?: string }) : null
+    if (!body) throw new Error('Publish checks run as a Netlify function, so they only work on the deployed site or under `netlify dev`.')
+    if (!res.ok) throw new Error(body.message ?? `The check failed (${res.status}).`)
+    return { status: body.status ?? 'failed', reason: body.reason ?? '', details: body.details ?? {} }
+  },
   async trackImageUse(storyId) {
     try {
       const { data: session } = await supabase!.auth.getSession()
@@ -279,6 +390,19 @@ const supabaseRepo: EditorRepo = {
     }
     return { status: 'failed', message: 'This is taking longer than expected. The run may still finish: check the editions list in a few minutes.' }
   },
+}
+
+/** The server's automation settings, as booleans only. Null if the function can't be reached. */
+async function automationConfig(): Promise<AutomationSnapshot['config']> {
+  try {
+    const { data: session } = await supabase!.auth.getSession()
+    const res = await fetch('/.netlify/functions/editor-automation', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session?.access_token ?? ''}` }, body: JSON.stringify({ action: 'status' }) })
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null
+    const b = (await res.json()) as { autoPublishEnabled?: boolean; alertsConfigured?: boolean; unsplashConfigured?: boolean }
+    return { autoPublishEnabled: Boolean(b.autoPublishEnabled), alertsConfigured: Boolean(b.alertsConfigured), unsplashConfigured: Boolean(b.unsplashConfigured) }
+  } catch {
+    return null
+  }
 }
 
 export const editorRepo: EditorRepo = IS_DEMO ? demoRepo : supabaseRepo

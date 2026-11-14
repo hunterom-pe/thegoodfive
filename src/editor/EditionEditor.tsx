@@ -53,7 +53,10 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
   const save = (story: EditorStory) => async (patch: Parameters<typeof editorRepo.updateStory>[2]) => {
     setError('')
     try {
-      await editorRepo.updateStory(edition.id, story.id, patch)
+      // On a published edition the words are locked, but an editor may still add or change the photo.
+      const imageOnly = Object.keys(patch).length > 0 && Object.keys(patch).every((k) => k.startsWith('image'))
+      if (published && imageOnly) await editorRepo.updateStoryImage(edition.id, story, patch)
+      else await editorRepo.updateStory(edition.id, story.id, patch)
       // Choosing an Unsplash photo must be reported to Unsplash (its API guidelines). Fire and forget.
       if (patch.imageSource === 'unsplash' && patch.imageUrl) void editorRepo.trackImageUse(story.id)
     } catch (e) {
@@ -103,6 +106,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
               isLast={i === primary.length - 1}
               actions={{
                 onSave: save(story),
+                searchPhotos: editorRepo.searchPhotos,
                 onMove: (direction) => setLineup(move(lineup, story.id, direction)),
                 onReject: (reason) => setLineup(reject(lineup, story.id), { id: story.id, reason }),
                 swap: {
@@ -133,6 +137,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
               busy={busy}
               actions={{
                 onSave: save(story),
+                searchPhotos: editorRepo.searchPhotos,
                 onReject: (reason) => setLineup(reject(lineup, story.id), { id: story.id, reason }),
                 swap: {
                   label: 'Use in the edition…',

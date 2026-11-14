@@ -37,6 +37,7 @@ function build(today: string): EditorEdition[] {
         imageSource: s.photo ? 'sample' : null,
         imageSourceUrl: s.photo ? 'https://unsplash.com/' : null,
         imageCreditUrl: s.photo ? 'https://unsplash.com/' : null,
+        imageEditorApproved: false,
         imageCandidates:
           edition.status === 'draft' && i === 0 && s.photo
             ? [
@@ -117,6 +118,11 @@ export const demoStore = {
       return { ...e, stories: e.stories.map((s) => (s.id === storyId ? { ...s, ...patch } : s)) }
     })
   },
+  /** Image-only changes are allowed on any edition, published or not. The words are never touched. */
+  updateImage(editionId: string, storyId: string, patch: StoryPatch) {
+    const imageOnly = Object.fromEntries(Object.entries(patch).filter(([k]) => k.startsWith('image')))
+    mutate(editionId, (e) => ({ ...e, stories: e.stories.map((s) => (s.id === storyId ? { ...s, ...imageOnly } : s)) }))
+  },
   createEdition(date: string): string {
     const state = load()
     if (state.editions.some((e) => e.date === date)) throw new Error('An edition for that date already exists.')
@@ -150,6 +156,7 @@ export const demoStore = {
         imageSource: input.imageUrl ? 'manual' : null,
         imageSourceUrl: null,
         imageCreditUrl: null,
+        imageEditorApproved: Boolean(input.imageUrl) && input.imageRightsConfirmed,
         imageCandidates: [],
         originalTitle: null,
         originalExcerpt: null,

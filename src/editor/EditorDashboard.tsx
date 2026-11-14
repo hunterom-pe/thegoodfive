@@ -4,6 +4,7 @@ import { addDays, formatLong, isISODate, todayISO } from '../lib/dates'
 import { useAsync, useTitle } from '../lib/hooks'
 import type { EditorEditionSummary } from '../lib/types'
 import { IS_DEMO } from '../lib/config'
+import { AutomationPanel } from './AutomationPanel'
 import { editorRepo } from './editorRepo'
 import { StatusBadge } from './StatusBadge'
 
@@ -130,6 +131,8 @@ export function EditorDashboard() {
         <h1 className="display text-[2.25rem] sm:text-5xl">Editions</h1>
         <p className="mt-2 max-w-[30rem] text-[0.9375rem] text-ink/70">Nothing reaches readers until you approve it here.</p>
       </div>
+
+      <AutomationPanel />
 
       {state.status === 'loading' && <p className="label text-earth">Loading editions…</p>}
       {state.status === 'error' && (

@@ -24,6 +24,7 @@ export interface CardActions {
   onSave: (patch: StoryPatch) => Promise<void>
   onMove?: (direction: -1 | 1) => void
   onReject: (reason: string) => void
+  searchPhotos?: (query: string) => Promise<import('../lib/types').ImageCandidate[]>
   /** For one of the five: swap with a backup. For a backup: take a slot. */
   swap?: { label: string; options: { value: string; label: string }[]; onPick: (value: string) => void }
 }
@@ -64,6 +65,12 @@ export function StoryReviewCard({
   const primary = story.role === 'primary'
   const panelId = `story-panel-${story.id}`
 
+  /** Image changes save at once, and clear only the image edits from the pending patch. */
+  async function applyImage(imagePatch: StoryPatch) {
+    await actions.onSave(imagePatch)
+    setPatch((p) => Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith('image'))) as StoryPatch)
+  }
+
   async function save() {
     setSaving(true)
     try {
@@ -101,7 +108,8 @@ export function StoryReviewCard({
       </div>
 
       {open && (
-        <fieldset id={panelId} disabled={locked} className="min-w-0 space-y-6 border-t border-line p-4 sm:p-5">
+        <div id={panelId} className="border-t border-line">
+        <fieldset disabled={locked} className="min-w-0 space-y-6 p-4 sm:p-5">
           {locked && <p className="border-l-2 border-sage pl-3 text-[0.8125rem] text-ink/70">Published and locked. Unpublish the edition to make corrections.</p>}
           {/* The research trail comes first: read the source before the copy. */}
           <section className="bg-mist p-4">
@@ -183,8 +191,6 @@ export function StoryReviewCard({
             </Field>
           </div>
 
-          <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={actions.onSave} />
-
           {dirty && !locked && (
             <div className="flex flex-wrap gap-3 border-t border-line pt-5">
               <button type="button" className="btn btn-solid" onClick={save} disabled={saving || !value.headline.trim() || !value.summary.trim() || !value.sourceName.trim() || !/^https?:\/\//i.test(value.sourceUrl)}>
@@ -196,6 +202,11 @@ export function StoryReviewCard({
             </div>
           )}
         </fieldset>
+        {/* The photo panel stays usable on a published edition: it changes only the image, never the words. */}
+        <div className="p-4 pt-0 sm:p-5 sm:pt-0">
+          <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={applyImage} imageDirty={Object.keys(patch).some((k) => k.startsWith('image'))} onSaveManual={() => applyImage(Object.fromEntries(Object.entries(patch).filter(([k]) => k.startsWith('image'))) as StoryPatch)} searchPhotos={actions.searchPhotos} />
+        </div>
+        </div>
       )}
 
       {/* Lineup controls */}

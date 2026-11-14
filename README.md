@@ -74,3 +74,44 @@ Setup: run `supabase/migrations/20261114000000_image_provenance.sql`, then add `
 3. Deploy. Functions only run on Netlify (or locally via `npx netlify dev`); the plain `npm run dev` server can't run them.
 
 Check a run's outcome in the `discovery_runs` table (status, counts, error).
+
+## Automatic publishing (Phase 5)
+
+The site can publish itself. **It is off until you switch it on**, and your manual editor works exactly as before either way.
+
+### The daily schedule (America/Phoenix; Arizona has no daylight saving, so these UTC times never change)
+| Phoenix | UTC cron | What | Function |
+|---|---|---|---|
+| 4:00 AM | `0 11 * * *` | Find news, fact-check, write the draft | `daily-draft` |
+| 5:00 AM | `0 12 * * *` | Retry, only if there is no draft (costs nothing otherwise) | `daily-draft-retry` |
+| 7:00 AM | `0 14 * * *` | Verify and publish | `daily-publish` |
+| 8:00 AM | `0 15 * * *` | Publish retry, harmless if 7:00 AM succeeded | `daily-publish-retry` |
+
+### What must be true before anything publishes itself
+Every story is re-checked at 7:00 AM from the source text stored with it (so a manual edit is verified, not trusted). An edition publishes only if **exactly five** stories pass all of this, otherwise **nothing** is published and the latest edition stays on the site with its real date:
+- a real `https` link to a source on the trusted list (`server/pipeline/sources.ts` plus `EXTRA_TRUSTED_DOMAINS`), re-fetched to confirm the article is still reachable and has not redirected elsewhere;
+- a source date within five days, and never an article that ran in the last 30 days of editions;
+- at least 450 characters of retrieved source text;
+- every figure, month, quotation and capitalised name in the headline and summary found in that source text, and at least 60% of the summary's wording traceable to it;
+- early-stage science and health findings stated with qualification, and no "cure"/"breakthrough"/"miracle" headlines;
+- positive, specific, general-audience wording, with no near-duplicate stories in the five.
+
+Failed stories are replaced by backups; rejected ones are recorded with the reason and shown in the dashboard.
+
+**What this proves, and what it does not.** These are deterministic checks against the publisher's own text: they prove the summary is *traceable to the cited article*, not that the article is true. An AI score is never treated as proof. A wrong claim made by a trusted publisher would pass. That is the trade-off of publishing without a human reading it.
+
+### Safe by design
+- Publishing goes through `auto_publish_edition()`, executable **only by the service role**: atomic, one edition per date, and a repeat or a simultaneous run returns `already_published`. It refuses a future date, an edition an editor marked **In review** (that is how you hold a day), an article repeated within the edition or the last 30 days, and any story failing the structural rules. Published editions stay locked.
+- No public endpoint can publish. The Netlify functions that can run it are scheduled-only; the editor ones verify an editor's login on the server.
+- Unsplash's API terms ask for non-automated use, so unattended runs **never search for or show an Unsplash photo**: a scheduled edition uses the geometric artwork. You choose photos yourself in the editor (a photo search per story). An Unsplash photo you did not personally approve is also withheld from automatically published editions. Publisher images (`og:image`) are only ever candidates for you to approve by hand.
+- A published edition can still get a photo later, without changing a word, through the same editor panel (`set_story_image` changes only image fields).
+
+### Turn it on
+1. Run the new migration `supabase/migrations/20261115000000_auto_publish.sql` in the Supabase SQL Editor.
+2. In Netlify, add `AUTO_PUBLISH_ENABLED` = `true`. Optionally `ALERT_WEBHOOK_URL` (for failure alerts) and `EXTRA_TRUSTED_DOMAINS`. Redeploy.
+3. Check it first: in `/editor` the **Automation** panel shows the state, and **Check today's edition now** runs every check on today's draft and tells you the result without publishing anything.
+
+To pause for a day, set the edition to **In review**. To stop entirely, set `AUTO_PUBLISH_ENABLED` to `false`.
+
+### Watching it
+The editor dashboard's **Automation** panel shows whether it is on, the last publication (automatic or by hand), the next scheduled runs, today's draft and publication results, accepted and rejected counts, every story turned away and why, and any error. The `publish_runs` and `discovery_runs` tables hold the full history.

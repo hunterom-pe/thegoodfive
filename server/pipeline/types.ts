@@ -48,8 +48,9 @@ export interface Evaluation {
 
 /** A finished story, ready to be stored as part of a draft. */
 export interface DraftStory {
-  role: 'primary' | 'backup'
-  position: number
+  role: 'primary' | 'backup' | 'rejected'
+  /** Null for rejected stories. */
+  position: number | null
   category: Category
   headline: string
   summary: string
@@ -61,6 +62,9 @@ export interface DraftStory {
   discovered_via: string
   ai_rationale: string
   claims_to_check: string[]
+  /** The publisher text this summary was checked against. Stored so a later check can verify any edit. */
+  source_material?: string
+  rejected_reason?: string | null
   image_url?: string | null
   image_alt?: string | null
   image_credit?: string | null

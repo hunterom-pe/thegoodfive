@@ -54,6 +54,8 @@ export interface ImageCandidate {
   creditUrl: string | null
   license: string | null
   sourceUrl: string | null
+  /** Unsplash only: the endpoint to notify when this photo is chosen. */
+  downloadLocation?: string | null
 }
 
 export interface EditorStory extends Omit<PublicStory, 'position'> {
@@ -71,6 +73,8 @@ export interface EditorStory extends Omit<PublicStory, 'position'> {
   imageCandidates: ImageCandidate[]
   /** Images only reach readers once approved: by the editor, or by a licensed provider's terms. */
   imageRightsConfirmed: boolean
+  /** A person chose or approved this image. Unattended publishing never shows an Unsplash photo without it. */
+  imageEditorApproved: boolean
   originalTitle: string | null
   originalExcerpt: string | null
   discoveredVia: string | null
@@ -115,6 +119,7 @@ export type StoryPatch = Partial<
     | 'imageCreditUrl'
     | 'imageCandidates'
     | 'imageRightsConfirmed'
+    | 'imageEditorApproved'
   >
 >
 

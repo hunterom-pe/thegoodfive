@@ -162,24 +162,37 @@ describe('robots.txt', () => {
 })
 
 describe('full pipeline with a fake AI', () => {
-  const pool = Array.from({ length: 30 }, (_, i) => cand(i + 1))
+  // Realistic enough to pass the gates: trusted domain, fresh date, and a summary built from the source's own words.
+  const VOCAB = 'volunteers community restored wetland habitat returned shelter planted native grasses neighbours gathered monitoring rivers recovered fisheries sanctuary wildlife protected landscape seedlings nurseries villagers partnership funding schools students teachers libraries clinics nurses vaccines hospitals treatment patients research laboratory scientists discovered observations telescope galaxies'.split(' ')
+  const material = Array.from({ length: 4 }, () => VOCAB.join(' ')).join('. ') + '.'
+  const sentence = (n: number) => Array.from({ length: n }, (_, i) => VOCAB[i % VOCAB.length]).join(' ')
+  const pool = Array.from({ length: 30 }, (_, i) => cand(i + 1, { url: `https://www.bbc.co.uk/news/articles/${i + 1}`, sourceName: 'BBC News', publishedAt: '2026-11-13T06:00:00Z' }))
   const fakeAi = (calls: string[]): AiClient => ({
     async json(req) {
       calls.push(req.name)
-      if (req.name === 'screening') {
-        const ids = [...req.user.matchAll(/"id":"(c\d+)"/g)].map((m) => m[1])
-        return { evaluations: ids.map((id, i) => ({ id, is_good_news: i % 2 === 0, category: 'health', significance: 4, credibility: 4, reason: 'ok' })) } as never
-      }
       const ids = [...req.user.matchAll(/"id":"(c\d+)"/g)].map((m) => m[1])
-      return { stories: ids.slice(0, 8).map((id, i) => ({ id, role: i < 5 ? 'primary' : 'backup', category: 'health', headline: `H ${id}`, summary: words(75), why_good_news: 'why', preliminary: false, claims_to_check: ['c'] })) } as never
+      if (req.name === 'screening') {
+        return { evaluations: ids.map((id, i) => ({ id, is_good_news: i % 2 === 0, category: 'nature', significance: 4, credibility: 4, reason: 'ok' })) } as never
+      }
+      const heads = ['Volunteers restored the wetland habitat along the river', 'Schools and libraries gathered new funding for students', 'Clinics and nurses reached patients with vaccines', 'Scientists discovered native grasses recovering across landscapes', 'Villagers protected wildlife in the new sanctuary landscape', 'Teachers planted seedlings in nurseries near neighbours', 'Researchers observed galaxies through a donated telescope array', 'Fisheries recovered after partnership funding reached rivers', 'Hospitals shared treatment research with laboratory scientists', 'Community monitoring helped shelter birds returned to habitat']
+      return { stories: ids.slice(0, 10).map((id, i) => ({ id, role: i < 5 ? 'primary' : 'backup', category: 'nature', headline: heads[i], summary: sentence(70), why_good_news: 'why', preliminary: false, claims_to_check: ['c'], image_query: 'wetland river habitat', about_specific_person: false })) } as never
     },
   })
-  it('makes exactly two AI calls and returns five plus three', async () => {
+  it('makes exactly two AI calls and returns five plus three, after fact-checking', async () => {
     const calls: string[] = []
-    const result = await runPipeline({ ai: fakeAi(calls), today: '2026-11-13', now: new Date(NOW), discover: async () => pool, fetchMaterial: async () => ({ siteName: null, description: null, images: [], text: 'Article body. '.repeat(60) }) })
+    const result = await runPipeline({ ai: fakeAi(calls), today: '2026-11-13', now: new Date(NOW), discover: async () => pool, fetchMaterial: async () => ({ siteName: null, description: null, images: [], text: material }) })
     expect(calls).toEqual(['screening', 'edition'])
-    expect(result.stats).toMatchObject({ discovered: 30, primary: 5, backup: 3 })
+    expect(result.stats).toMatchObject({ discovered: 30, primary: 5, backup: 3, accepted: 8 })
+    expect(result.stories.filter((s) => s.role === 'rejected')).toHaveLength(0) // the two spares are simply not kept
+    expect(result.stories[0].source_material).toContain('volunteers')
     expect(result.stats.screened).toBeGreaterThan(20)
+  })
+  it('rejects, with reasons, a story that cannot be supported by its source', async () => {
+    const lying: AiClient = { async json(req) { const r = await fakeAi([]).json<{ stories: { summary: string }[] }>(req); if (req.name === 'edition') r.stories[0].summary += ' It cost 4,500 dollars.'; return r as never } }
+    const result = await runPipeline({ ai: lying, today: '2026-11-13', now: new Date(NOW), discover: async () => pool, fetchMaterial: async () => ({ siteName: null, description: null, images: [], text: material }) })
+    const rejected = result.stories.filter((s) => s.role === 'rejected')
+    expect(rejected.some((s) => /4,500|4500/.test(s.rejected_reason ?? ''))).toBe(true)
+    expect(result.stories.filter((s) => s.role === 'primary')).toHaveLength(5) // a backup stepped up
   })
   it('spends nothing when there are too few candidates, and excludes stories it cannot read', async () => {
     const calls: string[] = []
