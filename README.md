@@ -40,7 +40,7 @@ Security checks are in `supabase/tests/` (run against a local Postgres with `loc
 
 ## AI drafts and the daily schedule (Phase 3)
 
-Every morning (and on demand) the app prepares an **unpublished draft**: five stories plus three backups, which you review in `/editor` like any other edition. It never publishes.
+Every morning (and on demand) the app prepares an **unpublished draft**: five stories plus three backups, which you can review in `/editor` like any other edition. By itself a draft run never publishes; publishing is a separate scheduled step (see below) that only runs when `AUTO_PUBLISH_ENABLED=true`.
 
 How a run works (`server/pipeline/`):
 1. **Discover**: 13 curated RSS feeds (`feeds.ts`) plus GDELT searches, last 72 hours.

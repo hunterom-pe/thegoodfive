@@ -58,12 +58,15 @@ export function AboutPage() {
           </ul>
         </Section>
 
-        <Section id="method" n="02" title="How we choose">
+        <Section id="method" n="02" title="How it works">
           <p>
-            Each morning, software reads widely for us: a global news index and a hand-picked list of credible outlets. It sets aside duplicates, then an AI model helps sort what’s left for stories that are genuinely positive, significant, recent and well sourced, and drafts a short summary of each using only what the original report says.
+            Every morning, software searches a global news index and a list of credible outlets. It sets aside duplicates, and an AI model picks stories that look genuinely positive, significant, recent and well sourced. It then writes a short summary of each, using only what the original report says.
           </p>
           <p>
-            Then a person takes over. Our editor reads the original reporting, checks the claims, rewrites where needed, and decides which five run. Nothing is published automatically, and nothing appears here until a human has approved the whole edition.
+            Automated checks come next: the source must be real and recent, and every name, number and claim in a summary has to be traceable to the article it cites. If everything passes, the edition publishes by itself. If anything fails, the edition is held back and nothing goes out that day, rather than something we can’t stand behind.
+          </p>
+          <p>
+            Those checks are good, not perfect. They show a summary matches its source, not that the source is right, and AI can still make mistakes. An editor can review, change or pull any edition at any time, and when we get something wrong we correct it and say so.
           </p>
           <p>We’d rather run a modest story that’s true than an exciting one that isn’t. If a day’s best five are all about science, so be it; we don’t force a quota.</p>
         </Section>
@@ -73,7 +76,7 @@ export function AboutPage() {
             We summarise; we don’t republish. Every story names the outlet that reported it, shows when it was published, and links straight to the original. The reporting is theirs, and we’d encourage you to read it in full.
           </p>
           <p>
-            Photographs appear only when we’re confident we have the right to show them, and are credited when they do. When we can’t, you’ll see a composition of squares instead. A news site’s preview image is not an invitation to reuse it.
+            Photographs appear only when we’re confident we have the right to show them, and are credited when they do. Automatic editions usually use a composition of squares instead, because the licensed photo services we use ask for a person to choose each picture. An editor can add a photo afterwards. A news site’s preview image is not an invitation to reuse it.
           </p>
           <p>If we get something wrong, we correct the story and say so.</p>
         </Section>

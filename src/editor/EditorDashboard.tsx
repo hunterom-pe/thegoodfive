@@ -56,7 +56,7 @@ function GeneratePanel({ onChanged }: { onChanged: () => void }) {
     <section className="border border-forest bg-white p-4 sm:p-5">
       <h2 className="label text-forest">AI draft</h2>
       <p className="mt-2 text-[0.875rem] leading-relaxed text-ink/70">
-        Searches recent news, screens it for genuinely good stories and writes a draft of five plus three backups from the original reporting. It saves a <strong>draft only</strong>: nothing is public until you approve it. It fills an empty draft for today and never overwrites stories you already have.
+        Searches recent news, screens it for genuinely good stories and writes a draft of five plus three backups from the original reporting. It saves a <strong>draft</strong> and never overwrites stories you already have. A draft is published automatically only when automatic publishing is on and every check passes; otherwise it waits for you to approve it.
       </p>
       <button type="button" className="btn btn-solid mt-4 w-full sm:w-auto" onClick={generate} disabled={busy || IS_DEMO}>
         {busy ? `Working… ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : 'Generate Today’s Five'}
@@ -129,7 +129,7 @@ export function EditorDashboard() {
     <div className="space-y-10">
       <div>
         <h1 className="display text-[2.25rem] sm:text-5xl">Editions</h1>
-        <p className="mt-2 max-w-[30rem] text-[0.9375rem] text-ink/70">Nothing reaches readers until you approve it here.</p>
+        <p className="mt-2 max-w-[30rem] text-[0.9375rem] text-ink/70">Editions publish automatically when automatic publishing is on and every check passes. You can review, edit, hold or correct any edition here.</p>
       </div>
 
       <AutomationPanel />

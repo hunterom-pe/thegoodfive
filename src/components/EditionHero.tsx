@@ -18,7 +18,7 @@ function copy(context: EditionContext, date: string) {
         kicker: 'Today’s edition',
         title: 'Good things happened today.',
         sub: 'Here are five worth knowing about.',
-        note: 'A small daily collection of encouraging developments, chosen by a person. Read it in a few minutes, then get on with your day.',
+        note: 'A small daily collection of encouraging developments, found with AI and checked before they run. Read it in a few minutes, then get on with your day.',
       }
     case 'latest':
       return {
@@ -31,7 +31,7 @@ function copy(context: EditionContext, date: string) {
       return {
         kicker: 'From the archive',
         title: `Good things happened on ${weekday}.`,
-        sub: 'Here are the five we chose that day.',
+        sub: 'Here are the five that ran that day.',
         note: 'This edition is kept exactly as it ran: the same five stories, in the same order, with their original sources.',
       }
   }

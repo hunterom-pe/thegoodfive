@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import { CATEGORIES } from '../lib/categories'
 import { formatShort } from '../lib/dates'
@@ -19,6 +19,26 @@ export function StoryMeta({ story, total = 5, className = '' }: { story: PublicS
       <span className="h-px w-5 bg-sage" aria-hidden="true" />
       <span className="text-earth">{CATEGORIES[story.category].label}</span>
     </p>
+  )
+}
+
+/**
+ * Images that failed to load, by story. The caption lives in StorySource, away from
+ * the photograph, so it asks this list: a credit is never shown for a picture that isn't there.
+ */
+const brokenImages = new Set<string>()
+const listeners = new Set<() => void>()
+const markBroken = (key: string) => {
+  if (brokenImages.has(key)) return
+  brokenImages.add(key)
+  listeners.forEach((l) => l())
+}
+const imageKey = (s: PublicStory) => `${s.id}|${s.imageUrl}`
+function useImageBroken(story: PublicStory): boolean {
+  return useSyncExternalStore(
+    (cb) => (listeners.add(cb), () => void listeners.delete(cb)),
+    () => brokenImages.has(imageKey(story)),
+    () => false,
   )
 }
 
@@ -62,6 +82,7 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
       <Arrow />
     </span>
   )
+  const photoBroken = useImageBroken(story)
   return (
     <div className={`border-t border-line pt-4 ${className}`}>
       <p className="text-[0.8125rem] leading-relaxed text-ink/70">
@@ -74,7 +95,7 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
         )}
         {isDemo && <span className="label ml-2 border border-earth/50 px-1.5 py-0.5 text-[0.5625rem] text-earth">Sample</span>}
       </p>
-      {story.imageUrl && <PhotoCredit story={story} />}
+      {story.imageUrl && !photoBroken && <PhotoCredit story={story} />}
       {isDemo || !/^https?:\/\//i.test(story.sourceUrl) ? (
         <Link to="/about#demo" className={linkClass}>
           <span className="link-quiet">About this sample story</span>
@@ -145,7 +166,10 @@ export function StoryFigure({
             if (img?.complete && img.naturalWidth > 0) setLoaded(true) // already cached
           }}
           onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
+          onError={() => {
+            setFailed(true)
+            markBroken(imageKey(story))
+          }}
           className={`absolute inset-0 size-full object-cover ${loaded ? 'is-loaded' : ''}`}
         />
       ) : (

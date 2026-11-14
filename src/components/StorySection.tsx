@@ -15,16 +15,18 @@ const anchor = (story: PublicStory) => ({ id: `story-${story.position}`, 'data-s
 /** A square photograph pushed off-centre, with a sage square stepping out behind it. */
 function Offset({ story, isDemo }: Props) {
   return (
-    <article {...anchor(story)} className={`${wrap} pb-16 pt-4 lg:pb-28`}>
-      <div className="lg:grid lg:grid-cols-12 lg:items-center lg:gap-12">
+    <article {...anchor(story)} className={`${wrap} pb-16 lg:pb-28 lg:pt-4`}>
+      {/* On phones a hairline closes the previous story and the marker opens this one, above its photograph. */}
+      <div className="border-t border-line pt-7 lg:grid lg:grid-cols-12 lg:items-center lg:gap-12 lg:border-t-0 lg:pt-0">
+        <StoryMeta story={story} className="mb-7 lg:hidden" />
         <Reveal variant="media" className="relative isolate ml-auto w-[82%] sm:w-[60%] lg:order-2 lg:col-span-5 lg:col-start-8 lg:w-full">
           <span data-sq="1" data-from="left" className="absolute -bottom-7 -left-7 -z-10 size-32 bg-sage lg:-bottom-10 lg:-left-10 lg:size-44" aria-hidden="true" />
           <StoryFigure story={story} ratio="aspect-square" sizes="(min-width: 1024px) 40vw, 82vw" />
           <span data-sq="2" data-from="top" className="absolute -top-3 right-6 size-6 bg-forest" aria-hidden="true" />
         </Reveal>
         <Reveal className="mt-16 lg:order-1 lg:col-span-6 lg:mt-0">
-          <StoryMeta story={story} />
-          <h2 className="display mt-4 text-[2.125rem] sm:text-[2.5rem] lg:text-[3rem]">{story.headline}</h2>
+          <StoryMeta story={story} className="max-lg:hidden" />
+          <h2 className="display mt-4 text-[2.125rem] max-lg:mt-0 sm:text-[2.5rem] lg:text-[3rem]">{story.headline}</h2>
           <p className="prose-story mt-5 max-w-[34rem]">{story.summary}</p>
           <StorySource story={story} isDemo={isDemo} className="mt-7 max-w-[34rem]" />
         </Reveal>
