@@ -14,6 +14,11 @@ export interface ImageOptions {
   /** utm_source for attribution links. Must not contain "unsplash". */
   appName?: string
   log?: (line: string) => void
+  /**
+   * Tell Unsplash a photo was chosen. Turn off for dry runs, which choose nothing for real.
+   * Default true.
+   */
+  notify?: boolean
   /** Overridable for tests. */
   search?: (query: string) => Promise<UnsplashPhoto[]>
   download?: (location: string | null | undefined) => Promise<boolean>
@@ -73,9 +78,10 @@ export async function attachImages(
         if (photos.length) {
           used.add(photos[0].p.id)
           chosen = photos[0].c
+          log(`Photo for "${story.headline.slice(0, 48)}": searched "${plan.query}"${plan.aboutPerson ? ' (about a person: no people)' : ''} → ${chosen.alt?.slice(0, 70)} (${photos.length} options)`)
           candidates.push(...photos.map((x) => x.c))
           // Unsplash asks to be told when a photo is chosen.
-          void download(chosen.downloadLocation).then((ok) => !ok && log(`Unsplash download notice not sent for ${chosen?.sourceUrl}`))
+          if (options.notify !== false) void download(chosen.downloadLocation).then((ok) => !ok && log(`Unsplash download notice not sent for ${chosen?.sourceUrl}`))
         } else log(`No suitable photo for "${plan.query}"`)
       } catch (e) {
         log(`Photo search skipped: ${e instanceof Error ? e.message : e}`)

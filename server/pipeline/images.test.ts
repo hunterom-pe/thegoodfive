@@ -45,8 +45,12 @@ describe('finding the article’s own image', () => {
 describe('choosing a licensed photo', () => {
   it('never picks portraits or text-heavy images, and avoids all people for a story about one person', () => {
     const photos = [photo('1', 'portrait of a smiling woman'), photo('2', 'a sign with text on a wall'), photo('3', 'children playing in a garden'), photo('4', 'microscope in a laboratory')]
-    expect(rankPhotos(photos, 'laboratory microscope', { aboutPerson: false }).map((p) => p.id)).toEqual(['4', '3'])
+    expect(rankPhotos(photos, 'laboratory microscope', { aboutPerson: false }).map((p) => p.id)).toEqual(['4'])
     expect(rankPhotos(photos, 'laboratory microscope', { aboutPerson: true }).map((p) => p.id)).toEqual(['4'])
+  })
+  it('refuses a photo that shares nothing with the story subject, rather than settle for a loosely related one', () => {
+    const photos = [photo('1', 'desktop monitor beside computer tower'), photo('2', null)]
+    expect(rankPhotos(photos, 'pediatric hospital medical research', { aboutPerson: true })).toEqual([])
   })
   it('prefers the photo that matches the story subject and skips photos already used', () => {
     const photos = [photo('1', 'a mountain lake'), photo('2', 'coral reef with tropical fish underwater'), photo('3', 'reef fish')]
@@ -72,6 +76,12 @@ describe('attaching images to a draft', () => {
     expect(kinds).toEqual(['original:og:image', 'illustrative:unsplash'])
     expect(out.image_candidates![0].license).toBeNull()
     expect(download).toHaveBeenCalledWith('https://api.unsplash.com/photos/2/download?ixid=abc')
+  })
+  it('does not notify Unsplash during a dry run', async () => {
+    const download = vi.fn(async () => true)
+    const [out] = await attachImages([story(1)], sources(1), plan, { search: async () => [photo('2', 'coral reef fish')], download, notify: false })
+    expect(out.image_rights_confirmed).toBe(true)
+    expect(download).not.toHaveBeenCalled()
   })
   it('selects the publisher image but leaves it NOT APPROVED when no licensed photo exists', async () => {
     const [none] = await attachImages([story(1)], sources(1), plan, { search: async () => [] })

@@ -62,8 +62,11 @@ export function rankPhotos(photos: UnsplashPhoto[], query: string, options: { ab
       let overlap = 0
       for (const w of wanted) if (have.has(w)) overlap++
       const wide = p.width >= 3000 ? 1 : 0
-      return { p, score: overlap * 3 + wide + (p.alt_description ? 1 : 0) }
+      return { p, overlap, score: overlap * 3 + wide + (p.alt_description ? 1 : 0) }
     })
+    // A photo must share at least one word with what the story is about. A merely
+    // "related" result (a computer for a medical story) is worse than the artwork.
+    .filter(({ overlap }) => overlap >= 1)
     .sort((a, b) => b.score - a.score)
     .map(({ p }) => p)
 }

@@ -40,7 +40,7 @@ if (save) {
   console.log('\nResult:', data)
   process.exit(data?.status === 'succeeded' ? 0 : 1)
 } else {
-  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, log: console.log, images: { unsplashKey: c.unsplashKey || undefined, appName: c.appName, log: console.log } })
+  const { stories, stats } = await runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, log: console.log, images: { unsplashKey: c.unsplashKey || undefined, appName: c.appName, log: console.log, notify: false } })
   console.log('\nStats:', stats)
   for (const s of stories) {
     console.log(`\n[${s.role} ${s.position}] ${s.category.toUpperCase()}  ${s.headline}\n  ${s.source_name} · ${s.source_published_at?.slice(0, 10) ?? 'date unknown'} · ${s.source_url}\n  ${s.summary}\n  why: ${s.ai_rationale}\n  check: ${s.claims_to_check.join(' | ')}\n  photo: ${s.image_url ? `${s.image_kind} · ${s.image_source} · ${s.image_credit ?? 'no credit'} · ${s.image_rights_confirmed ? 'APPROVED' : 'NOT APPROVED'} · ${s.image_url.slice(0, 80)}` : 'none (geometric fallback)'} · candidates: ${s.image_candidates?.length ?? 0}`)
