@@ -40,8 +40,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 export async function fetchGdelt(queries: string[], hours: number, log: (line: string) => void): Promise<Candidate[]> {
   const found: Candidate[] = []
+  // GDELT asks for one request per five seconds. Tests shrink this with GDELT_PAUSE_MS.
+  const pause = Number(process.env.GDELT_PAUSE_MS ?? 6_000)
   for (const [i, query] of queries.entries()) {
-    if (i > 0) await sleep(6_000)
+    if (i > 0) await sleep(pause)
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?${new URLSearchParams({
       query,
       mode: 'ArtList',
@@ -54,7 +56,7 @@ export async function fetchGdelt(queries: string[], hours: number, log: (line: s
       let res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) })
       if (res.status === 429) {
         // Rate limited: wait once, then move on. GDELT is a bonus source, never a blocker.
-        await sleep(12_000)
+        await sleep(pause * 2)
         res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) })
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)

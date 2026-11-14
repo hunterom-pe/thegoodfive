@@ -10,6 +10,8 @@
       content="A daily edition of exactly five good news stories from around the world. Five good things. Every day. That's it."
     />
     <link rel="canonical" href="https://thegoodfive.netlify.app/" />
+    <!-- Connect to the database host early: the edition is fetched from there as soon as the script runs. -->
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
     <!-- Link previews. Crawlers don't run scripts, so these describe the site, not a single edition.
          If the site moves to its own domain, update every https://thegoodfive.netlify.app URL in this file. -->
     <meta property="og:site_name" content="The Good Five" />

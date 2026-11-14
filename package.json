@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "draft": "node --env-file-if-exists=.env.local server/cli.ts"
+    "draft": "node --env-file-if-exists=.env.local server/cli.ts",
+    "audit": "node --env-file-if-exists=.env.local server/audit.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

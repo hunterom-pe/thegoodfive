@@ -35,7 +35,7 @@ export function StoryArt({ category }: { category: Category }) {
           <rect key={i} x={x} y={y} width={size} height={size} fill={fill} />
         ))}
       </svg>
-      <span className="label absolute bottom-3 left-3" style={{ color: plate.ink }}>
+      <span className="label absolute bottom-3 left-3 px-1.5 py-1" style={{ color: plate.ink, background: plate.bg }}>
         {CATEGORIES[category].short}
       </span>
     </div>

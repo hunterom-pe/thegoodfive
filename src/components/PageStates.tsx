@@ -14,7 +14,7 @@ export function PageMessage({ title, children, action }: { title: string; childr
 
 export function PageLoading({ label = 'Gathering the five…' }: { label?: string }) {
   return (
-    <section className={`${wrap} flex min-h-[60dvh] flex-col justify-center`} role="status">
+    <section className={`${wrap} flex min-h-[calc(100dvh-3.5rem)] flex-col justify-center`} role="status">
       <FiveSquares className="motion-safe:animate-pulse" />
       <p className="label mt-5 text-earth">{label}</p>
     </section>

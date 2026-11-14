@@ -21,6 +21,8 @@ export function env() {
     autoPublish: (e.AUTO_PUBLISH_ENABLED ?? '').trim().toLowerCase() === 'true',
     alertWebhook: e.ALERT_WEBHOOK_URL || '',
     extraTrusted: e.EXTRA_TRUSTED_DOMAINS || '',
+    runDeadlineMs: Number(e.RUN_DEADLINE_MS) || RUN_DEADLINE_MS,
+    aiRetryDelays: (e.AI_RETRY_DELAYS_MS ?? '').split(',').filter((x) => x.trim() !== '').map((x) => Number(x)).filter((n) => Number.isFinite(n) && n >= 0),
     maxRunsPerDay: Number(e.MAX_RUNS_PER_DAY || 4),
     siteUrl: (e.URL || e.SITE_URL || 'http://localhost:8888').replace(/\/$/, ''),
   }
@@ -98,9 +100,9 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     // recorded as failed with a clear reason and the editor's page (which waits 16 minutes) hears about it.
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('The run took longer than 13 minutes and was stopped. Try again, or use a faster AI model.')), RUN_DEADLINE_MS)
+      timer = setTimeout(() => reject(new Error(`The run took longer than ${Math.round(c.runDeadlineMs / 60_000)} minutes and was stopped. Try again, or use a faster AI model.`)), c.runDeadlineMs)
     })
-    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
+    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.openAiKey, c.model, c.aiBaseUrl, { reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) {
       await webhookNotifier(c.alertWebhook)(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)

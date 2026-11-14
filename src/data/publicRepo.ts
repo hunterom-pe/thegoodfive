@@ -1,7 +1,6 @@
 import { IS_DEMO, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/config'
 import { todayISO } from '../lib/dates'
 import type { Category, EditionSummary, ImageKind, EditorEdition, PublicEdition, PublicStory } from '../lib/types'
-import { demoStore } from './demoStore'
 
 /**
  * Everything the public site reads. Readers only ever receive published
@@ -64,24 +63,25 @@ function toPublic(edition: EditorEdition): PublicEdition {
 /** Used by the editor preview as well, so a preview is exactly what readers will get. */
 export const editionAsPublic = toPublic
 
-const demoPublished = () =>
-  demoStore
+// Demo content lives in its own chunk, downloaded only when the site runs without Supabase.
+const demoPublished = async () =>
+  (await import('./demoStore')).demoStore
     .editions()
     .filter((e) => e.status === 'published' && e.date <= todayISO())
     .sort((a, b) => b.date.localeCompare(a.date))
 
 const demoRepo: PublicRepo = {
   async latest() {
-    const [first] = demoPublished()
+    const [first] = await demoPublished()
     return first ? toPublic(first) : null
   },
   async byDate(date) {
-    const found = demoPublished().find((e) => e.date === date)
+    const found = (await demoPublished()).find((e) => e.date === date)
     return found ? toPublic(found) : null
   },
   async archive(before) {
     return paginateArchive(
-      demoPublished().map((e) => {
+      (await demoPublished()).map((e) => {
         const { id, date, isDemo, stories } = toPublic(e)
         return { id, date, isDemo, stories: stories.map(({ position, category, headline }) => ({ position, category, headline })) }
       }),
@@ -117,9 +117,9 @@ interface StoryRow {
 }
 
 async function rest<T>(path: string): Promise<T> {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-  })
+  // The anon key is public by design. Sending it as a query parameter (no custom headers) makes this a
+  // "simple" request, which skips the CORS preflight round trip: noticeably faster on a phone's first visit.
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}${path.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}`)
   if (!res.ok) throw new Error(`Could not load the edition (${res.status})`)
   return res.json() as Promise<T>
 }

@@ -115,3 +115,14 @@ To pause for a day, set the edition to **In review**. To stop entirely, set `AUT
 
 ### Watching it
 The editor dashboard's **Automation** panel shows whether it is on, the last publication (automatic or by hand), the next scheduled runs, today's draft and publication results, accepted and rejected counts, every story turned away and why, and any error. The `publish_runs` and `discovery_runs` tables hold the full history.
+
+## Checking that everything is healthy
+
+```bash
+npm run audit      # production-readiness report: env names, live schema and security, deployed endpoints, secrets (never prints a value; read-only)
+npm test           # unit tests (125)
+npm run test:e2e   # the whole daily cycle and 20 failure scenarios, on a throwaway local Postgres with a fixture "internet"
+npm run draft      # dry run of the news pipeline (saves nothing)
+```
+
+`npm run test:e2e` needs PostgreSQL's `initdb`, `pg_ctl` and `psql` installed locally (it skips itself otherwise). It starts a temporary database, applies every migration, and intercepts every network call, so it can never reach your live site, Supabase, OpenAI or Unsplash.

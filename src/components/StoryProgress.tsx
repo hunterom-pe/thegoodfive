@@ -31,25 +31,28 @@ export function StoryProgress({ count = 5 }: { count?: number }) {
     }
   }, [])
 
+  const square = (n: number) => (
+    <span className={`size-2 border border-forest transition-colors duration-300 ${n <= reached ? 'bg-forest' : 'bg-transparent'} ${n === reached ? 'scale-125' : ''}`} />
+  )
+  const numbers = Array.from({ length: count }, (_, i) => i + 1)
   return (
-    <nav aria-label="Stories in this edition" className="hidden items-center xs:flex">
-      {Array.from({ length: count }, (_, i) => {
-        const n = i + 1
-        const filled = n <= reached
-        return (
-          <a
-            key={n}
-            href={`#story-${n}`}
-            aria-label={`Story ${n} of ${count}`}
-            aria-current={n === reached ? 'true' : undefined}
-            className="grid h-11 w-5 place-items-center"
-          >
-            <span
-              className={`size-2 border border-forest transition-colors duration-300 ${filled ? 'bg-forest' : 'bg-transparent'} ${n === reached ? 'scale-125' : ''}`}
-            />
+    <>
+      {/* 400px and wider: each square is a 24px-wide link to its story (WCAG 2.2 target size). */}
+      <nav aria-label="Stories in this edition" className="progress-links items-center">
+        {numbers.map((n) => (
+          <a key={n} href={`#story-${n}`} aria-label={`Story ${n} of ${count}`} aria-current={n === reached ? 'true' : undefined} className="grid h-11 w-6 place-items-center">
+            {square(n)}
           </a>
-        )
-      })}
-    </nav>
+        ))}
+      </nav>
+      {/* Narrower phones: the same five squares as a reading-progress indicator, without tap targets that would be too small. */}
+      <div role="img" aria-label={`Reading progress: story ${Math.max(reached, 1)} of ${count}`} className="progress-dots items-center gap-2">
+        {numbers.map((n) => (
+          <span key={n} className="grid w-2 place-items-center">
+            {square(n)}
+          </span>
+        ))}
+      </div>
+    </>
   )
 }

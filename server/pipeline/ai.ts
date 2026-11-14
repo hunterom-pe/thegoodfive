@@ -29,6 +29,8 @@ export interface AiOptions {
   /** "low" or "none" makes thinking models (Gemini, o-series) answer much faster. Only sent when set. */
   reasoningEffort?: string
   timeoutSeconds?: number
+  /** Waits between retries of a busy provider (default 5s, 20s, 60s). */
+  retryDelaysMs?: number[]
   /** Told about retries and fallbacks, so slow runs are explainable. */
   log?: (line: string) => void
 }
@@ -68,7 +70,7 @@ export function openAiClient(apiKey: string, model: string, baseUrl = 'https://a
         // Rate limits and overloaded servers are usually brief: wait and retry a few times (5s, 20s, 60s).
         // Nothing else is worth repeating, or paying for.
         if ((res.status === 429 || res.status >= 500) && retries < 3) {
-          const wait = [5_000, 20_000, 60_000][retries++]
+          const wait = (options.retryDelaysMs ?? [5_000, 20_000, 60_000])[retries++] ?? 60_000
           options.log?.(`AI provider busy (HTTP ${res.status}); retry ${retries}/3 in ${wait / 1000}s`)
           await sleep(wait)
           continue

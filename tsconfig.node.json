@@ -14,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "server", "netlify"]
+  "include": ["vite.config.ts", "vitest.e2e.config.ts", "server", "netlify", "e2e"]
 }

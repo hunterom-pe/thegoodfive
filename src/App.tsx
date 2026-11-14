@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { PageLoading } from './components/PageStates'
-import { AboutPage } from './pages/AboutPage'
-import { ArchivePage } from './pages/ArchivePage'
-import { EditionPage } from './pages/EditionPage'
 import { HomePage } from './pages/HomePage'
-import { NotFoundPage } from './pages/NotFoundPage'
+
+// The home page ships in the main bundle; the rest load when first visited.
+const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })))
+const ArchivePage = lazy(() => import('./pages/ArchivePage').then((m) => ({ default: m.ArchivePage })))
+const EditionPage = lazy(() => import('./pages/EditionPage').then((m) => ({ default: m.EditionPage })))
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })))
 
 // The editor (and the Supabase auth client it needs) is a separate chunk
 // that readers never download.
@@ -45,6 +47,7 @@ export default function App() {
         Skip to the stories
       </a>
       <div id="main" className="contents">
+        <Suspense fallback={<PageLoading label="Opening…" />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/archive" element={<ArchivePage />} />
@@ -60,6 +63,7 @@ export default function App() {
           />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        </Suspense>
       </div>
     </BrowserRouter>
   )
