@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const PORT = 54330
+const PORT = Number(process.env.E2E_PG_PORT ?? 54330) // override to run two suites side by side
 
 export interface PgInstance {
   dir: string
@@ -75,7 +75,7 @@ const lit = (v: unknown): string => {
 const ident = (s: string) => `"${s.replace(/"/g, '""')}"`
 
 // Argument types for the database functions we call through rpc().
-const ARG_TYPES: Record<string, string> = { p_stories: 'jsonb', p_rejections: 'jsonb', p_image: 'jsonb', p_primary: 'uuid[]', p_date: 'date', p_edition: 'uuid', p_story: 'uuid', p_status: 'public.edition_status', p_primary_ids: 'uuid[]' }
+const ARG_TYPES: Record<string, string> = { p_stories: 'jsonb', p_rejections: 'jsonb', p_image: 'jsonb', p_primary: 'uuid[]', p_date: 'date', p_edition: 'uuid', p_story: 'uuid', p_status: 'public.edition_status', p_primary_ids: 'uuid[]', p_checked: 'jsonb' }
 
 interface Filter { col: string; op: string; val: unknown }
 type Result = { data: unknown; error: { message: string; code?: string } | null; count?: number | null }
@@ -94,7 +94,7 @@ class Query implements PromiseLike<Result> {
   private count = false
   private body: Record<string, unknown> | Record<string, unknown>[] | null = null
   private returning = false
-  constructor(private pg: PgInstance, private role: string, private table: string, private hook?: (kind: string, table: string) => void) {}
+  constructor(private pg: PgInstance, private role: string, private table: string, private hook?: (kind: string, table: string) => { message: string } | void) {}
 
   select(cols = '*', opts?: { count?: 'exact'; head?: boolean }) {
     if (this.op === 'select') this.cols = cols
@@ -173,7 +173,9 @@ class Query implements PromiseLike<Result> {
   }
 
   private run(): Result {
-    this.hook?.(this.op, this.table)
+    // A simulated outage answers the way supabase-js does: with an error value, not an exception.
+    const outage = this.hook?.(this.op, this.table)
+    if (outage) return { data: null, error: { message: outage.message } }
     try {
       const { sql, wantsRows } = this.build()
       if (!wantsRows) { this.pg.exec(sql, this.role); return { data: null, error: null } }
@@ -201,10 +203,7 @@ export function localDb(pg: PgInstance, options: LocalDbOptions = {}): SupabaseC
   const fail = (kind: string, name: string) => options.onCall?.(kind, name)
   const client = {
     from: (table: string) => {
-      const q = new Query(pg, role, table, (kind, t) => {
-        const f = fail(kind, t)
-        if (f) throw new Error(f.message)
-      })
+      const q = new Query(pg, role, table, (kind, t) => fail(kind, t))
       return q
     },
     async rpc(fn: string, args: Record<string, unknown> = {}): Promise<Result> {

@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
-import { webhookNotifier } from './alerts.ts'
+import { trackedNotifier, webhookNotifier } from './alerts.ts'
 import { aiConfig } from './pipeline/gemini.ts'
 import { aiClaimVerifier, type ClaimVerifier } from './pipeline/verify.ts'
 import type { LibraryPhoto } from './pipeline/library.ts'
@@ -64,18 +64,23 @@ export async function startRun(db: SupabaseClient, date: string, trigger: 'sched
   const cap = env().maxRunsPerDay
 
   // A run that died without reporting (e.g. the platform killed it) must not block tomorrow.
-  await db
+  const stale = await db
     .from('discovery_runs')
     .update({ status: 'failed', error: 'Run did not finish and was marked failed.', finished_at: new Date().toISOString() })
     .eq('status', 'running')
     .lt('started_at', new Date(Date.now() - 20 * 60_000).toISOString())
+  // Every check below protects against a bad run (a duplicate, a published day, a runaway AI bill).
+  // If one cannot be completed, do NOT start: an unreadable answer is not "all clear".
+  if (stale.error) return { ok: false, status: 500, message: `Could not check earlier runs, so no run was started: ${stale.error.message}` }
 
-  const { data: edition } = await db.from('editions').select('id, status, stories(id)').eq('edition_date', date).maybeSingle()
+  const { data: edition, error: editionError } = await db.from('editions').select('id, status, stories(id)').eq('edition_date', date).maybeSingle()
+  if (editionError) return { ok: false, status: 500, message: `Could not check the existing edition, so no run was started: ${editionError.message}` }
   if (edition?.status === 'published') return { ok: false, status: 409, message: `The edition for ${date} is already published, so it won’t be changed.` }
   if (edition && (edition.stories as unknown[]).length > 0) return { ok: false, status: 409, message: `The edition for ${date} already has stories. Generation only fills an empty draft, so your work is safe.` }
 
-  const { count } = await db.from('discovery_runs').select('id', { count: 'exact', head: true }).eq('edition_date', date).neq('status', 'skipped')
-  if ((count ?? 0) >= cap) return { ok: false, status: 429, message: `Today’s limit of ${cap} generation runs has been reached.` }
+  const { count, error: budgetError } = await db.from('discovery_runs').select('id', { count: 'exact', head: true }).eq('edition_date', date).neq('status', 'skipped')
+  if (budgetError || count === null || count === undefined) return { ok: false, status: 500, message: `Could not read today’s run budget, so no run was started: ${budgetError?.message ?? 'no count returned'}` }
+  if (count >= cap) return { ok: false, status: 429, message: `Today’s limit of ${cap} generation runs has been reached.` }
 
   const { data, error } = await db.from('discovery_runs').insert({ edition_date: date, status: 'running', trigger }).select('id').single()
   if (error) {
@@ -85,21 +90,36 @@ export async function startRun(db: SupabaseClient, date: string, trigger: 'sched
   return { ok: true, runId: data.id as string, date }
 }
 
-async function finish(db: SupabaseClient, runId: string, status: 'succeeded' | 'skipped' | 'failed', stats: Record<string, unknown>, error?: string) {
-  await db.from('discovery_runs').update({ status, stats, error: error ?? null, finished_at: new Date().toISOString() }).eq('id', runId)
+/**
+ * Write a run's outcome down. If that fails the run stays "running" until the stale-run cleanup, so the
+ * failure is logged and alerted rather than swallowed; it never throws, so cleanup always completes.
+ */
+async function finish(db: SupabaseClient, runId: string, status: 'succeeded' | 'skipped' | 'failed', stats: Record<string, unknown>, error?: string, notify?: (message: string) => Promise<void>) {
+  const { error: writeError } = await db.from('discovery_runs').update({ status, stats, error: error ?? null, finished_at: new Date().toISOString() }).eq('id', runId)
+  if (writeError) {
+    console.error(`draft: could not record the run outcome (${status}): ${writeError.message.slice(0, 200)}`)
+    await notify?.(`A draft run finished as "${status}" but its outcome could not be saved (${writeError.message.slice(0, 160)}). It will show as running until it is cleaned up.`)
+  }
 }
 
 /** Run the whole pipeline and store the result as an unpublished draft. Never throws; the outcome is recorded on the run. */
 export async function executeRun(db: SupabaseClient, runId: string, date: string, log: (line: string) => void = console.log): Promise<void> {
   const stats: Record<string, unknown> = {}
+  const c0 = env()
+  // Alerts that cannot be delivered are remembered and stored with the run, so nobody has to guess whether they were told.
+  const tracked = trackedNotifier(webhookNotifier(c0.alertWebhook))
+  const alertNote = () => (tracked.failures.length ? { alertFailures: [...tracked.failures] } : {})
   try {
     const c = env()
-    const { data: runRow } = await db.from('discovery_runs').select('trigger').eq('id', runId).single()
+    const { data: runRow, error: runError } = await db.from('discovery_runs').select('trigger').eq('id', runId).single()
+    if (runError) throw new Error(`Could not read the run: ${runError.message}`)
     // Unsplash's API terms ask for non-automated use: only a run an editor started may search for photos.
     // Scheduled runs leave images to the editor (their own photo search) or to the geometric artwork.
     const personPresent = runRow?.trigger === 'manual'
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
-    const { data: recent } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
+    const { data: recent, error: recentError } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
+    // Without the recent articles we cannot avoid repeating one, so stop instead of guessing.
+    if (recentError) throw new Error(`Could not read recent editions, so no draft was written: ${recentError.message}`)
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
     const library = await loadLibrary(db)
 
@@ -112,23 +132,23 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, noticeKey: c.unsplashKey || undefined, library, today: date, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) {
-      await webhookNotifier(c.alertWebhook)(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)
-      return await finish(db, runId, 'skipped', stats, 'No suitable stories were found. Nothing was saved.')
+      await tracked.notify(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)
+      return await finish(db, runId, 'skipped', { ...stats, ...alertNote() }, 'No suitable stories were found. Nothing was saved.', tracked.notify)
     }
 
     const { data: editionId, error } = await db.rpc('create_draft_edition', { p_date: date, p_stories: result.stories })
     if (error) throw new Error(error.message)
-    if (!editionId) return await finish(db, runId, 'skipped', stats, 'The edition changed while generating, so nothing was saved.')
+    if (!editionId) return await finish(db, runId, 'skipped', { ...stats, ...alertNote() }, 'The edition changed while generating, so nothing was saved.', tracked.notify)
     await recordLibraryUse(db, editionId as string, date, result.stories, log)
     // Photos are expected every day: say so loudly when a story will run without one.
     const bare = result.stories.filter((s) => s.role === 'primary' && !s.image_rights_confirmed).length
-    if (bare > 0) await webhookNotifier(c.alertWebhook)(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
-    await finish(db, runId, 'succeeded', stats)
+    if (bare > 0) await tracked.notify(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
+    await finish(db, runId, 'succeeded', { ...stats, ...alertNote() }, undefined, tracked.notify)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     log(`Run failed: ${message}`)
-    await webhookNotifier(env().alertWebhook)(`Draft generation for ${date} failed: ${message.slice(0, 300)}`)
-    await finish(db, runId, 'failed', stats, message.slice(0, 500))
+    await tracked.notify(`Draft generation for ${date} failed: ${message.slice(0, 300)}`)
+    await finish(db, runId, 'failed', { ...stats, ...alertNote() }, message.slice(0, 500), tracked.notify)
   }
 }
 
@@ -201,8 +221,8 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
       if (error) throw new Error(`Could not read recent editions: ${error.message}`)
       return (data ?? []).map((r) => r.source_url as string)
     },
-    async publish(editionId, date, primary, rejections): Promise<PublishDecision> {
-      const { data, error } = await db.rpc('auto_publish_edition', { p_edition: editionId, p_date: date, p_primary: primary, p_rejections: rejections })
+    async publish(editionId, date, primary, rejections, checked): Promise<PublishDecision> {
+      const { data, error } = await db.rpc('auto_publish_edition', { p_edition: editionId, p_date: date, p_primary: primary, p_rejections: rejections, p_checked: checked })
       if (error) throw new Error(error.message)
       return data as PublishDecision
     },
@@ -251,7 +271,8 @@ async function recordLibraryUse(db: SupabaseClient, editionId: string, date: str
   for (const s of used) {
     const { error } = await db.from('stories').update({ image_editor_approved: true }).eq('edition_id', editionId).eq('source_url', s.source_url)
     if (error) log(`Could not mark a library photo as approved: ${error.message}`)
-    const { data: row } = await db.from('photo_library').select('use_count').eq('id', s.image_library_id!).single()
-    await db.from('photo_library').update({ last_used_on: date, use_count: ((row?.use_count as number | undefined) ?? 0) + 1 }).eq('id', s.image_library_id!)
+    const { data: row, error: readError } = await db.from('photo_library').select('use_count').eq('id', s.image_library_id!).single()
+    const { error: useError } = readError ? { error: readError } : await db.from('photo_library').update({ last_used_on: date, use_count: ((row?.use_count as number | undefined) ?? 0) + 1 }).eq('id', s.image_library_id!)
+    if (useError) log(`Could not record the use of a library photo (it may repeat sooner): ${useError.message}`)
   }
 }

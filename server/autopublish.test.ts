@@ -1,14 +1,15 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { SCHEDULE } from '../src/lib/schedule'
-import { runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
+import { contentHash, runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
 import { backup, DATE, edition, fiveGood, NOW, story } from './fixtures'
-import { webhookNotifier } from './alerts'
+import { trackedNotifier, webhookNotifier } from './alerts'
 import { judge, type ClaimVerifier } from './pipeline/verify'
 
 /** An in-memory stand-in for the database that obeys the same rules as auto_publish_edition(). */
 class MemoryStore implements PublishStore {
   published: { editionId: string; primary: string[]; rejections: { id: string; reason: string }[] }[] = []
+  lastChecked: { id: string; hash: string }[] = []
   runs: PublishRunRecord[] = []
   recent: string[] = []
   private lock: Promise<void> = Promise.resolve()
@@ -21,14 +22,17 @@ class MemoryStore implements PublishStore {
     if (this.failWith?.op === 'recent') throw new Error(this.failWith.message)
     return this.recent
   }
-  async publish(editionId: string, _date: string, primary: string[], rejections: { id: string; reason: string }[]): Promise<PublishDecision> {
+  async publish(editionId: string, _date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string }[]): Promise<PublishDecision> {
     if (this.failWith?.op === 'publish') throw new Error(this.failWith.message)
+    this.lastChecked = checked
     const run = this.lock.then(async () => {
       await new Promise((r) => setTimeout(r, 5)) // time for a competing attempt to arrive
       const ed = this.ed!
       if (ed.status === 'published') return 'already_published' as const
       if (ed.status !== 'draft') return 'held' as const
       if (primary.length !== 5) throw new Error('Exactly five distinct stories are required.')
+      // Like the database function: every chosen story must still be exactly what was checked.
+      if (primary.some((id) => !checked.some((c) => c.id === id && c.hash === contentHash(ed.stories.find((s) => s.id === id)!)))) return 'changed' as const
       ed.status = 'published'
       this.published.push({ editionId, primary, rejections })
       return 'published' as const
@@ -275,20 +279,99 @@ describe('dates and boundaries', () => {
 })
 
 describe('alerts', () => {
-  it('sends a webhook message (and never throws) when configured', async () => {
+  const at = (fetchImpl: unknown) => webhookNotifier('https://hooks.example.com/abc', fetchImpl as typeof fetch)
+  it('sends a webhook message and reports it delivered', async () => {
     const fetchSpy = vi.fn(async () => new Response('ok'))
-    await webhookNotifier('https://hooks.example.com/abc', fetchSpy as unknown as typeof fetch)('Nothing was published.')
+    expect(await at(fetchSpy)('Nothing was published.')).toEqual({ ok: true })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const body = JSON.parse((fetchSpy.mock.calls[0] as unknown as [string, { body: string }])[1].body)
     expect(body.text).toContain('Nothing was published.')
     expect(body.content).toBe(body.text)
-    await expect(webhookNotifier('https://hooks.example.com/abc', (async () => { throw new Error('down') }) as unknown as typeof fetch)('x')).resolves.toBeUndefined()
   })
-  it('does nothing without a webhook, or with an insecure one', async () => {
+  it('reports an error status instead of pretending the alert was delivered', async () => {
+    for (const status of [400, 404, 429, 500, 503]) {
+      const r = await at(async () => new Response('nope', { status }))('x')
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining(`HTTP ${status}`) })
+    }
+  })
+  it('reports an unreachable or timed-out webhook, without throwing and without leaking its address', async () => {
+    const down = await at(async () => { throw new Error('getaddrinfo ENOTFOUND hooks.example.com') })('x')
+    expect(down).toMatchObject({ ok: false, error: 'The alert webhook could not be reached.' })
+    const slow = await at(async () => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }) })('x')
+    expect(slow).toMatchObject({ ok: false, error: 'The alert webhook timed out.' })
+    expect(JSON.stringify([down, slow])).not.toContain('hooks.example.com')
+  })
+  it('does nothing without a webhook; an insecure one is reported as misconfigured', async () => {
     const fetchSpy = vi.fn()
-    await webhookNotifier(undefined, fetchSpy as unknown as typeof fetch)('x')
-    await webhookNotifier('http://insecure.example.com', fetchSpy as unknown as typeof fetch)('x')
+    expect(await webhookNotifier(undefined, fetchSpy as unknown as typeof fetch)('x')).toMatchObject({ ok: true, skipped: true })
+    expect(await webhookNotifier('http://insecure.example.com', fetchSpy as unknown as typeof fetch)('x')).toMatchObject({ ok: false })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+  it('a tracked notifier remembers every failed delivery and never throws', async () => {
+    const t = trackedNotifier(async () => ({ ok: false, error: 'The alert webhook answered HTTP 500.' }))
+    await t.notify('a')
+    await t.notify('b')
+    expect(t.failures).toEqual(['The alert webhook answered HTTP 500.', 'The alert webhook answered HTTP 500.'])
+    const thrower = trackedNotifier(async () => { throw new Error('boom') })
+    await expect(thrower.notify('x')).resolves.toBeUndefined()
+    expect(thrower.failures[0]).toMatch(/could not be sent: boom/)
+  })
+})
+
+describe('failures during publication are visible, and never stop cleanup', () => {
+  it('records that an alert was not delivered, and still records the outcome', async () => {
+    const store = new MemoryStore(edition(fiveGood().slice(0, 4))) // only four stories: a failure that alerts
+    const notify = vi.fn(async () => ({ ok: false, error: 'The alert webhook answered HTTP 500.' }))
+    const out = await go(store, { notify })
+    expect(out.status).toBe('failed')
+    expect(notify).toHaveBeenCalled()
+    expect(store.runs).toHaveLength(1)
+    expect(store.runs[0].details.alertFailures).toEqual(['The alert webhook answered HTTP 500.'])
+  })
+  it('a webhook that throws cannot break the run', async () => {
+    const store = new MemoryStore(edition(fiveGood().slice(0, 4)))
+    const out = await go(store, { notify: async () => { throw new Error('boom') } })
+    expect(out.status).toBe('failed')
+    expect(store.runs[0].details.alertFailures?.[0]).toMatch(/boom/)
+  })
+  it('when the outcome cannot be saved, someone is told, and the result is still returned', async () => {
+    const store = new MemoryStore(edition(fiveGood()), { op: 'record', message: 'permission denied for table publish_runs' })
+    const notify = vi.fn(async () => {})
+    const out = await go(store, { notify })
+    expect(out.status).toBe('published') // the database change itself went through
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/record could not be saved.*permission denied/))
+  })
+})
+
+describe('content edited after it was checked', () => {
+  it('refuses to publish when a chosen story is edited while the claim check is running', async () => {
+    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    const notify = vi.fn(async () => {})
+    const verify: ClaimVerifier = async () => {
+      store.ed!.stories[2].summary += ' An editor added this sentence while the check was running.' // lands between check and publish
+      return { verdict: 'verified', issues: [] }
+    }
+    const out = await go(store, { verify, notify })
+    expect(out.status).toBe('skipped')
+    expect(out.reason).toMatch(/edited after it was checked/)
+    expect(store.published).toHaveLength(0)
+    expect(store.ed!.status).toBe('draft')
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('edited after it was checked'))
+  })
+  it('publishes normally, and passes the fingerprint of exactly what was read', async () => {
+    const store = new MemoryStore(edition(fiveGood()))
+    const out = await go(store)
+    expect(out.status).toBe('published')
+    expect(store.lastChecked).toHaveLength(5)
+    expect(store.lastChecked[0]).toEqual({ id: 's0', hash: contentHash(store.ed!.stories[0]) })
+  })
+  it('the fingerprint changes with any checked field and ignores the rest', () => {
+    const base = story(0)
+    const h = contentHash(base)
+    for (const change of [{ headline: base.headline + '!' }, { summary: base.summary + ' x' }, { category: 'health' }, { sourceName: 'Other' }, { sourceUrl: base.sourceUrl + '/b' }, { sourceMaterial: (base.sourceMaterial ?? '') + ' more' }]) {
+      expect(contentHash({ ...base, ...change }), JSON.stringify(Object.keys(change))).not.toBe(h)
+    }
+    expect(contentHash({ ...base, role: 'backup' } as typeof base)).toBe(h)
   })
 })
 

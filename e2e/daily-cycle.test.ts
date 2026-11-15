@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { executeRun, editionToday, startRun } from '../server/store'
 import { scheduledDraft, scheduledPublish } from '../server/scheduled'
+import { contentHash } from '../server/autopublish'
 import { localDb, postgresAvailable, startPg, type PgInstance } from './localdb'
 import { World } from './world'
 
@@ -124,7 +125,9 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(retry?.status).toBe('skipped')
     expect((pg.query(`select published_at from public.editions where edition_date = '${TODAY}'`)[0] as { published_at: string }).published_at).toBe(stamp)
     expect(pg.query(`select 1 from public.editions where status = 'published' and edition_date = '${TODAY}'`)).toHaveLength(1)
-    expect(world.alerts).toEqual([])
+    // The photo library is empty in this scenario, so the one message sent says so; nothing else went wrong.
+    expect(world.alerts).toHaveLength(1)
+    expect(world.alerts[0]).toMatch(/5 of 5 stories without an approved photo/)
   })
 
   // ── feature flag and manual control ──────────────────────────────────
@@ -386,6 +389,143 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     for (const s of shown) expect(s.image_credit).toBeTruthy()
     expect(out?.record.details.warnings?.join(' ') ?? '').not.toMatch(/no approved photo/)
     expect(world.log.filter((u) => u.includes('api.unsplash.com') && u.includes('/search/'))).toEqual([])
+  })
+
+  // ── round 2: integrity ───────────────────────────────────────────────
+  const tomorrow = () => new Date(Date.parse(`${TODAY}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+
+  it('the database fingerprint matches the application’s, byte for byte', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const rows = pg.query(`select s.id, s.headline, s.summary, s.category::text as category, s.source_name, s.source_url, s.source_material, public.story_content_hash(s) as db_hash from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}'`) as { headline: string; summary: string; category: string; source_name: string; source_url: string; source_material: string | null; db_hash: string }[]
+    expect(rows.length).toBeGreaterThanOrEqual(5)
+    for (const r of rows) expect(contentHash({ headline: r.headline, summary: r.summary, category: r.category, sourceName: r.source_name, sourceUrl: r.source_url, sourceMaterial: r.source_material })).toBe(r.db_hash)
+  })
+
+  it('a story edited while the claim check is running is not published, and the edition stays a draft', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    let edited = false
+    world.onClaimCheck = () => {
+      if (edited) return
+      edited = true // an editor saves a change after the application read the draft but before it publishes
+      pg.exec(`update public.stories set summary = summary || ' An editor added a sentence.' where id = (select s.id from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.role = 'primary' and s.position = 3)`)
+    }
+    const out = await scheduledPublish('schedule', { db })
+    world.onClaimCheck = undefined
+    expect(out?.status).toBe('skipped')
+    expect(out?.reason).toMatch(/edited after it was checked/)
+    expect(todayRow()?.status).toBe('draft')
+    expect(publicDates()).toEqual([YESTERDAY])
+    expect(world.alerts.join(' ')).toMatch(/edited after it was checked/)
+    // The next run reads the edited text, checks it, and decides for itself: nothing unchecked ever goes out.
+    const retry = await scheduledPublish('retry', { db })
+    if (retry?.status === 'published') expect(publicHeadlines(TODAY)).toHaveLength(5)
+    else expect(todayRow()?.status).toBe('draft')
+  })
+
+  it('the publish function itself refuses stale or missing fingerprints, whatever the caller says', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const ed = pg.query(`select id from public.editions where edition_date = '${TODAY}'`)[0] as { id: string }
+    const five = pg.query(`select s.id, public.story_content_hash(s) as hash from public.stories s where s.edition_id = '${ed.id}' and s.role = 'primary' order by s.position`) as { id: string; hash: string }[]
+    const call = (checked: unknown) => db.rpc('auto_publish_edition', { p_edition: ed.id, p_date: TODAY, p_primary: five.map((f) => f.id), p_rejections: [], p_checked: checked })
+    const stale = await call(five.map((f, i) => ({ id: f.id, hash: i === 1 ? 'deadbeef' : f.hash })))
+    expect(stale).toMatchObject({ data: 'changed', error: null })
+    expect((await call(five.slice(0, 4))).error?.message).toMatch(/checked content of all five/)
+    expect((await call(five.map((f) => ({ id: f.id, hash: null })))).data).toBe('changed')
+    expect(todayRow()?.status).toBe('draft') // nothing moved
+    expect(publicDates()).toEqual([YESTERDAY])
+    const good = await call(five)
+    expect(good).toMatchObject({ data: 'published', error: null })
+  })
+
+  it('an approved edition dated in the future is invisible to the public API until its day', async () => {
+    seedPublished(YESTERDAY)
+    seedPublished(TODAY, 'today')
+    seedPublished(tomorrow(), 'future')
+    expect(publicDates()).toEqual([TODAY, YESTERDAY]) // not tomorrow
+    expect(publicHeadlines(tomorrow())).toEqual([])
+    expect(pg.query(`select 1 from public.public_stories where headline like 'future story%'`, 'anon')).toHaveLength(0)
+    expect(pg.query(`select 1 from public.public_stories where headline like 'today story%'`, 'anon')).toHaveLength(5)
+    // The editor's own tables still hold it: it is approved, only hidden from readers.
+    expect(pg.query(`select status from public.editions where edition_date = '${tomorrow()}'`)[0]).toMatchObject({ status: 'published' })
+    // And a direct story query by id cannot reach it either.
+    const id = (pg.query(`select s.id from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${tomorrow()}' limit 1`)[0] as { id: string }).id
+    expect(pg.query(`select 1 from public.public_stories where id = '${id}'`, 'anon')).toHaveLength(0)
+  })
+
+  it('if the run budget cannot be read, no run starts and nothing is spent on AI; the failure is alerted', async () => {
+    seedPublished(YESTERDAY)
+    const broken = localDb(pg, { onCall: (kind, name) => (kind === 'select' && name === 'discovery_runs' ? { message: 'upstream connect error (503)' } : undefined) })
+    await scheduledDraft('schedule', { db: broken })
+    expect(world.calls('api.fake-llm.test')).toBe(0)
+    expect(pg.query(`select 1 from public.discovery_runs`)).toHaveLength(0)
+    expect(world.alerts.join(' ')).toMatch(/run budget/)
+  })
+
+  it('if the existing edition cannot be checked, no run starts', async () => {
+    seedPublished(YESTERDAY)
+    const broken = localDb(pg, { onCall: (kind, name) => (kind === 'select' && name === 'editions' ? { message: 'permission denied' } : undefined) })
+    await scheduledDraft('schedule', { db: broken })
+    expect(world.calls('api.fake-llm.test')).toBe(0)
+    expect(pg.query(`select 1 from public.discovery_runs`)).toHaveLength(0)
+    expect(world.alerts.join(' ')).toMatch(/existing edition/)
+  })
+
+  it('if the publish outcome cannot be saved, the edition still publishes and an alert says the record is missing', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const noLog = localDb(pg, { onCall: (kind, name) => (kind === 'insert' && name === 'publish_runs' ? { message: 'disk full' } : undefined) })
+    const out = await scheduledPublish('schedule', { db: noLog })
+    expect(out?.status).toBe('published')
+    expect(world.alerts.join(' ')).toMatch(/record could not be saved.*disk full/)
+    expect(pg.query(`select 1 from public.publish_runs`)).toHaveLength(0)
+  })
+
+  it('if a draft run’s outcome cannot be saved, the failure is alerted instead of swallowed', async () => {
+    seedPublished(YESTERDAY)
+    const noFinish = localDb(pg, { onCall: (kind, name) => (kind === 'update' && name === 'discovery_runs' && world.calls('api.fake-llm.test') > 0 ? { message: 'connection reset' } : undefined) })
+    world.background = async ({ secret, body }) => {
+      if (secret !== process.env.GENERATION_SECRET) return 403
+      await executeRun(noFinish, body.runId!, body.date!, () => {})
+      return 202
+    }
+    await scheduledDraft('schedule', { db })
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(world.alerts.join(' ')).toMatch(/outcome could not be saved.*connection reset/)
+    world.background = async ({ secret, body }) => {
+      if (secret !== process.env.GENERATION_SECRET) return 403
+      void executeRun(db, body.runId!, body.date!, () => {})
+      return 202
+    }
+  })
+
+  it('a failing alert webhook is recorded with the run, and the run still completes', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    world.reset({ claimCheck: 'down', webhook: 'http500' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('failed') // held: the claim check is down
+    const rec = pg.query(`select status, details from public.publish_runs where edition_date = '${TODAY}' order by started_at desc limit 1`)[0] as { status: string; details: { alertFailures?: string[] } }
+    expect(rec.status).toBe('failed')
+    expect(rec.details.alertFailures?.[0]).toMatch(/HTTP 500/)
+    expect(todayRow()?.status).toBe('draft')
+  })
+
+  it('an unreachable alert webhook never blocks a publication', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    world.reset({ webhook: 'down' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('published')
+    expect(publicDates()).toEqual([TODAY, YESTERDAY])
   })
 
   // ── generation taking too long ───────────────────────────────────────

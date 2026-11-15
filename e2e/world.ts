@@ -25,6 +25,8 @@ export interface WorldState {
   aiDelayMs: number
   /** The claim-by-claim check run before publishing: fine, unavailable, or finding a conflict in every story. */
   claimCheck: 'ok' | 'down' | 'conflict'
+  /** The alert webhook: delivering, answering with an error status, or unreachable. */
+  webhook: 'ok' | 'http500' | 'down'
 }
 
 const TRUSTED = [
@@ -111,12 +113,14 @@ function fakeModel(body: { messages: { role: string; content: string }[]; respon
 export interface Sent { url: string; init?: RequestInit }
 
 export class World {
-  state: WorldState = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok' }
+  state: WorldState = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok', webhook: 'ok' }
   /** Everything fetched, so tests can assert what did (and did not) happen. */
   log: string[] = []
   blocked: string[] = []
   alerts: string[] = []
   /** Handler for the background function, installed by the test (it runs the real executeRun). */
+  /** Called when the claim-by-claim check is asked a question: lets a test edit a story "while the check is running". */
+  onClaimCheck?: () => void
   background?: (req: { secret: string | null; body: { runId?: string; date?: string } }) => Promise<number>
   private real?: typeof fetch
 
@@ -128,7 +132,7 @@ export class World {
     if (this.real) globalThis.fetch = this.real
   }
   reset(over: Partial<WorldState> = {}) {
-    this.state = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok', ...over }
+    this.state = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok', webhook: 'ok', ...over }
     this.log = []; this.blocked = []; this.alerts = []
   }
   calls = (needle: string) => this.log.filter((u) => u.includes(needle)).length
@@ -147,12 +151,15 @@ export class World {
       if (this.state.ai === 'hang') return this.hang(init)
       if (this.state.ai === 'error500') return text('{"error":"upstream failure"}', 500, 'application/json')
       const parsed = JSON.parse(String(init?.body))
+      if (parsed.response_format?.json_schema?.name === 'claim_check') this.onClaimCheck?.()
       if (this.state.claimCheck === 'down' && parsed.response_format?.json_schema?.name === 'claim_check') return text('{"error":"claim check unavailable"}', 500, 'application/json')
       const content = JSON.stringify(fakeModel(parsed, this.state.ai, this.state.claimCheck))
       return text(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content } }] }), 200, 'application/json')
     }
     if (u.host === 'hooks.example.com') {
       this.alerts.push(JSON.parse(String(init?.body)).text)
+      if (this.state.webhook === 'down') throw new Error('connect ECONNREFUSED hooks.example.com')
+      if (this.state.webhook === 'http500') return text('upstream error', 500)
       return text('ok')
     }
     if (u.host === 'e2e.site' && u.pathname.endsWith('/generate-draft-background')) {

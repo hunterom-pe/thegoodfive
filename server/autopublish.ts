@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { normalizeUrl } from './pipeline/dedupe.ts'
 import { describe, evaluateStory, selectFive, type Candidate, type Failure, type GateContext, type GateStory } from './pipeline/gates.ts'
 import { hostOf, isTrusted, trustedDomains } from './pipeline/sources.ts'
-import type { Notify } from './alerts.ts'
+import { trackedNotifier, type Notify } from './alerts.ts'
 import type { ClaimVerifier, Verification } from './pipeline/verify.ts'
 
 export interface StoredStory {
@@ -27,7 +28,17 @@ export interface StoredEdition {
   stories: StoredStory[]
 }
 
-export type PublishDecision = 'published' | 'already_published' | 'held'
+export type PublishDecision = 'published' | 'already_published' | 'held' | 'changed'
+
+/**
+ * A fingerprint of everything the checks read about a story. The database computes the same value
+ * (public.story_content_hash) and refuses to publish a story whose fingerprint differs from the one that was
+ * checked, so an edit made between checking and publishing can never go out unchecked. md5 detects change; it is not for secrecy.
+ */
+export function contentHash(s: Pick<StoredStory, 'headline' | 'summary' | 'category' | 'sourceName' | 'sourceUrl' | 'sourceMaterial'>): string {
+  const md5 = (t: string) => createHash('md5').update(t, 'utf8').digest('hex')
+  return md5([s.headline ?? '', s.summary ?? '', s.category ?? '', s.sourceName ?? '', s.sourceUrl ?? '', md5(s.sourceMaterial ?? '')].join('\x1f'))
+}
 
 /** Everything the publisher needs from storage. The real one talks to Supabase; tests use memory. */
 export interface PublishStore {
@@ -35,7 +46,7 @@ export interface PublishStore {
   /** normalized or raw URLs of articles in editions published in the last 30 days (before `date`). */
   recentSourceUrls(date: string): Promise<string[]>
   /** The restricted, service-role-only database function. Throws if the database refuses. */
-  publish(editionId: string, date: string, primary: string[], rejections: { id: string; reason: string }[]): Promise<PublishDecision>
+  publish(editionId: string, date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string }[]): Promise<PublishDecision>
   record(run: PublishRunRecord): Promise<void>
 }
 
@@ -50,6 +61,8 @@ export interface PublishRunRecord {
     accepted?: { headline: string; source: string }[]
     rejected?: { headline: string; source: string; reasons: string[] }[]
     warnings?: string[]
+    /** Alerts that could not be delivered, so a failure nobody heard about is still visible here. */
+    alertFailures?: string[]
     /** Stories the claim check could not confirm, or found conflicting. */
     needsReview?: { headline: string; source: string; verdict: string; issues: string[] }[]
   }
@@ -128,20 +141,28 @@ const toGate = (s: StoredStory): GateStory => ({
 export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublishOutcome> {
   const log = o.log ?? (() => {})
   const now = o.now ?? new Date()
+  const tracked = trackedNotifier(o.notify)
   const record = async (status: PublishStatus, reason: string, details: PublishRunRecord['details'] = {}): Promise<AutoPublishOutcome> => {
+    const live = !o.dryRun && o.trigger !== 'check'
     const run: PublishRunRecord = { date: o.date, status, trigger: o.trigger, reason, details }
-    if (!o.dryRun && o.trigger !== 'check') {
+    if (live) {
+      // Record the alerts that did not get through, along with the outcome itself.
+      if (tracked.failures.length) run.details = { ...run.details, alertFailures: [...tracked.failures] }
       try {
         await o.store.record(run)
       } catch (e) {
-        log(`Could not record the run: ${e instanceof Error ? e.message : e}`)
+        // The outcome could not be written down. That is itself a failure someone must hear about.
+        const why = e instanceof Error ? e.message : String(e)
+        log(`Could not record the run: ${why}`)
+        console.error(`publish: could not record the outcome (${status}): ${why.slice(0, 200)}`)
+        await tracked.notify(`The publish run for ${o.date} ended as "${status}" but its record could not be saved (${why.slice(0, 160)}). Check the site and the run log.`)
       }
     }
     return { status, reason, record: run }
   }
   const alert = async (message: string) => {
     if (o.dryRun || o.trigger === 'check') return
-    await o.notify?.(message + (o.trigger === 'schedule' ? ' A retry runs at 8:00 AM Phoenix time.' : ' Needs attention.'))
+    await tracked.notify(message + (o.trigger === 'schedule' ? ' A retry runs at 8:00 AM Phoenix time.' : ' Needs attention.'))
   }
 
   if (!o.enabled && !o.dryRun && o.trigger !== 'check') return record('disabled', 'Automatic publishing is switched off (AUTO_PUBLISH_ENABLED is not "true").')
@@ -160,6 +181,8 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
     const ctx: GateContext = { now, recentUrls: recent, trustedDomains: domains }
     const live = o.checkSource ?? makeSourceChecker(domains)
 
+    // What the checks read, fingerprinted now: the database refuses to publish anything that differs from this.
+    const checkedHash = new Map(edition.stories.map((s) => [s.id, contentHash(s)]))
     const ordered = edition.stories
       .filter((s) => s.role !== 'rejected')
       .sort((a, b) => (a.role === b.role ? (a.position ?? 99) - (b.position ?? 99) : a.role === 'primary' ? -1 : 1))
@@ -223,7 +246,12 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
     }
     if (o.dryRun || o.trigger === 'check') return record('dry_run', 'All five stories pass. Automatic publishing would go ahead.', details)
 
-    const decision = await o.store.publish(edition.id, o.date, chosen.map((s) => s.id), rejected.map((r) => ({ id: r.item.id, reason: r.reasons.join(' ').slice(0, 900) })))
+    const decision = await o.store.publish(edition.id, o.date, chosen.map((s) => s.id), rejected.map((r) => ({ id: r.item.id, reason: r.reasons.join(' ').slice(0, 900) })), chosen.map((s) => ({ id: s.id, hash: checkedHash.get(s.id)! })))
+    if (decision === 'changed') {
+      const why = 'A story was edited after it was checked, so nothing was published. The next run checks the new text.'
+      await alert(why)
+      return record('skipped', why, details)
+    }
     if (decision === 'already_published') return record('skipped', 'Another run published this edition first. Nothing was changed.', details)
     if (decision === 'held') return record('skipped', 'An editor took hold of the edition just before publishing. Nothing was published.', details)
     log(`Published ${o.date}`)

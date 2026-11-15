@@ -14,7 +14,14 @@ export async function scheduledDraft(trigger: 'schedule' | 'retry', deps: { db?:
   try {
     const db = deps.db ?? admin()
     const run = await startRun(db, editionToday(), 'schedule')
-    if (!run.ok) return console.log(`draft ${trigger}: skipped. ${run.message}`)
+    if (!run.ok) {
+      // 409 and 429 are expected answers (already drafted, already running, budget spent). A 500 means a required
+      // check could not be completed: that is a failure to report, not a quiet skip.
+      if (run.status !== 500) return console.log(`draft ${trigger}: skipped. ${run.message}`)
+      console.error(`draft ${trigger}: ${run.message}`)
+      await webhookNotifier(c.alertWebhook)(`Draft generation could not start: ${run.message.slice(0, 300)}${trigger === 'schedule' ? ' A retry runs at 5:00 AM Phoenix time.' : ' Needs attention.'}`)
+      return
+    }
     const started = await triggerBackground(db, run.runId, run.date)
     if (!started.ok) {
       console.error('draft:', started.message)
