@@ -41,24 +41,28 @@ export interface PickContext {
  * Choose the library photo that best fits a story, or none. A photo must either share subject words
  * with the story (the editor's keywords, or its description) or be marked as a good all-round picture
  * for the story's category. Photos showing people are never used for a story about a specific person.
- * A recently used photo rests, so a daily publication doesn't repeat itself.
+ * A recently used photo rests, so a daily publication doesn't repeat itself, unless nothing else fits.
  */
 export function pickFromLibrary(story: { category: string; headline: string; summary: string }, library: LibraryPhoto[], ctx: PickContext): LibraryPhoto | null {
   const wanted = tokens(`${ctx.query ?? ''} ${ctx.query ?? ''} ${story.headline} ${story.summary}`)
   const rest = ctx.restDays ?? 10
-  const scored = library
-    .filter((p) => !ctx.used.has(p.id) && p.categories.includes(story.category) && !(ctx.aboutPerson && p.showsPeople) && daysSince(p.lastUsedOn, ctx.today) >= rest)
+  const eligible = library
+    .filter((p) => !ctx.used.has(p.id) && p.categories.includes(story.category) && !(ctx.aboutPerson && p.showsPeople))
     .map((p) => {
       const have = tokens(`${p.keywords.join(' ')} ${p.alt}`)
       let overlap = 0
       for (const w of wanted) if (have.has(w)) overlap++
       // Keywords an editor chose count more than words in a caption.
       const keyword = p.keywords.reduce((n, k) => n + (tokens(k).size && [...tokens(k)].every((w) => wanted.has(w)) ? 1 : 0), 0)
-      return { p, score: overlap + keyword * 2 }
+      return { p, score: overlap + keyword * 2, rested: daysSince(p.lastUsedOn, ctx.today) >= rest }
     })
+    // A photo must fit the story's subject, or be an all-round picture for its category.
     .filter(({ p, score }) => score >= 1 || p.generic)
-    .sort((a, b) => b.score - a.score || (a.p.lastUsedOn ?? '').localeCompare(b.p.lastUsedOn ?? ''))
-  return scored[0]?.p ?? null
+  // Prefer photos that have rested; when the library is small and all have been used lately, reuse the one
+  // used longest ago, because an unusual repeat is better than no photo. Then the best subject match.
+  const pool = eligible.some((e) => e.rested) ? eligible.filter((e) => e.rested) : eligible
+  pool.sort((a, b) => b.score - a.score || (a.p.lastUsedOn ?? '').localeCompare(b.p.lastUsedOn ?? ''))
+  return pool[0]?.p ?? null
 }
 
 /** The stored candidate for a library photo, labelled illustrative like every other stock photo. */

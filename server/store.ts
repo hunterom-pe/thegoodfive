@@ -120,6 +120,9 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     if (error) throw new Error(error.message)
     if (!editionId) return await finish(db, runId, 'skipped', stats, 'The edition changed while generating, so nothing was saved.')
     await recordLibraryUse(db, editionId as string, date, result.stories, log)
+    // Photos are expected every day: say so loudly when a story will run without one.
+    const bare = result.stories.filter((s) => s.role === 'primary' && !s.image_rights_confirmed).length
+    if (bare > 0) await webhookNotifier(c.alertWebhook)(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
     await finish(db, runId, 'succeeded', stats)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

@@ -28,7 +28,12 @@ describe('choosing a photo from the library', () => {
   it('does not give one photo to two stories, and rests a photo after it is used', () => {
     const lib = [photo('a', { keywords: ['meadow'] })]
     expect(pickFromLibrary(story, lib, { ...ctx, used: new Set(['a']) })).toBeNull()
-    expect(pickFromLibrary(story, [photo('a', { keywords: ['meadow'], lastUsedOn: '2026-11-12' })], ctx)).toBeNull()
+    // Rested photos win over recently used ones...
+    const both = [photo('recent', { keywords: ['meadow'], lastUsedOn: '2026-11-15' }), photo('old', { keywords: ['meadow'], lastUsedOn: '2026-10-01' })]
+    expect(pickFromLibrary(story, both, ctx)?.id).toBe('old')
+    // ...but a small library still gives a photo, the one used longest ago, rather than none.
+    const small = [photo('a', { keywords: ['meadow'], lastUsedOn: '2026-11-15' }), photo('b', { keywords: ['meadow'], lastUsedOn: '2026-11-12' })]
+    expect(pickFromLibrary(story, small, ctx)?.id).toBe('b')
     expect(pickFromLibrary(story, [photo('a', { keywords: ['meadow'], lastUsedOn: '2026-11-01' })], ctx)?.id).toBe('a')
   })
   it('returns nothing from an empty library', () => {

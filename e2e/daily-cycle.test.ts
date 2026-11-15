@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { executeRun, editionToday, startRun } from '../server/store'
 import { scheduledDraft, scheduledPublish } from '../server/scheduled'
@@ -368,6 +370,22 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(shown.length).toBe(withLibrary.length)
     for (const s of shown) expect(s.image_kind).toBe('illustrative')
     expect(pg.query(`select use_count from public.photo_library where use_count > 0`).length).toBeGreaterThan(0)
+  })
+
+  it('with the starter library installed, every story gets a credited photo and the published edition shows five photos', async () => {
+    seedPublished(YESTERDAY)
+    pg.exec(readFileSync(join(process.cwd(), 'supabase/seeds/photo_library_seed.sql'), 'utf8')) // the real starter library, exactly as a person would run it
+    await scheduledDraft('schedule', { db })
+    const generation = await waitForGeneration()
+    expect(generation.status, String(generation.error)).toBe('succeeded')
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status, out?.reason).toBe('published')
+    const shown = pg.query(`select image_url, image_credit, image_kind from public.public_stories where image_url is not null`, 'anon') as { image_credit: string; image_kind: string }[]
+    expect(shown).toHaveLength(5)
+    for (const s of shown) expect(s).toMatchObject({ image_kind: 'illustrative' })
+    for (const s of shown) expect(s.image_credit).toBeTruthy()
+    expect(out?.record.details.warnings?.join(' ') ?? '').not.toMatch(/no approved photo/)
+    expect(world.log.filter((u) => u.includes('api.unsplash.com') && u.includes('/search/'))).toEqual([])
   })
 
   // ── generation taking too long ───────────────────────────────────────
