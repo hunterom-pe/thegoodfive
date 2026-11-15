@@ -49,3 +49,42 @@ describe('a library photo as a story image', () => {
     expect(c.url).toContain('ixid=abc')
   })
 })
+
+describe('relevance rules', () => {
+  const sciStory = { category: 'science', headline: 'Physicists use laser light to unlock properties in a crystal', summary: 'Researchers shone laser light on a crystal and measured its electrical response.' }
+  it('a shared common word (light, water, white) is not a subject match', () => {
+    const textile = photo('t', { categories: ['science'], keywords: ['floral', 'textile'], alt: 'Black and white floral textile with light colours' })
+    expect(pickFromLibrary(sciStory, [textile], ctx)).toBeNull()
+    const lamp = photo('l', { categories: ['science'], keywords: ['water', 'light'], alt: 'Water and light' })
+    expect(pickFromLibrary(sciStory, [lamp], ctx)).toBeNull()
+  })
+  it('a real subject word matches, singular or plural', () => {
+    const turbines = photo('w', { categories: ['progress'], keywords: ['turbines', 'wind'], alt: 'Wind turbines' })
+    const story = { category: 'progress', headline: 'Wind turbine output hits a record', summary: 'The turbine fleet produced more power than ever.' }
+    expect(pickFromLibrary(story, [turbines], ctx)?.id).toBe('w')
+    const stars = photo('s', { categories: ['science'], keywords: ['star', 'astronomy'], alt: 'A cluster of blue stars' })
+    expect(pickFromLibrary({ category: 'science', headline: 'Astronomers map thousands of stars', summary: 'A new survey charts stars.' }, [stars], ctx)?.id).toBe('s')
+  })
+  it('a photo that matches the subject beats a neutral one', () => {
+    const neutral = photo('n', { categories: ['nature'], keywords: ['scenery'], generic: true, alt: 'Green hills' })
+    const coral = photo('c', { categories: ['nature'], keywords: ['coral', 'reef', 'marine'], alt: 'Coral reef' })
+    expect(pickFromLibrary({ category: 'nature', headline: 'Coral reef sanctuary declared', summary: 'Marine protection for the reef.' }, [neutral, coral], ctx)?.id).toBe('c')
+  })
+  it('a neutral picture serves an ordinary story but never a sensitive one', () => {
+    const hills = photo('n', { categories: ['health'], generic: true, keywords: ['hospital', 'corridor'], alt: 'Empty hospital corridor' })
+    const ordinary = { category: 'health', headline: 'Walking schedule linked to less pain', summary: 'Regular routines helped older adults.' }
+    expect(pickFromLibrary(ordinary, [hills], ctx)?.id).toBe('n')
+    for (const headline of ['Infant becomes seizure-free after treatment', 'Alzheimer’s may shrink brain regions years early', 'Wartime bravery of woman who hid troops revealed', 'Family of cancer survivor thanks nurses']) {
+      expect(pickFromLibrary({ category: 'health', headline, summary: 'A report says so.' }, [hills], ctx), headline).toBeNull()
+    }
+  })
+  it('a story about a specific person never gets a neutral picture, only a genuine subject match without people', () => {
+    const hills = photo('n', { categories: ['humanity'], generic: true, keywords: ['village', 'street'], alt: 'Village street' })
+    const person = { category: 'humanity', headline: 'Long-lost draft of a famous speech resurfaces', summary: 'The speech draft was found in an archive.' }
+    expect(pickFromLibrary(person, [hills], { ...ctx, aboutPerson: true })).toBeNull()
+    const archive = photo('a', { categories: ['humanity'], keywords: ['archive', 'speech', 'manuscript'], alt: 'Archive manuscripts' })
+    expect(pickFromLibrary(person, [archive], { ...ctx, aboutPerson: true })?.id).toBe('a')
+    const crowd = photo('p', { categories: ['humanity'], showsPeople: true, keywords: ['speech'], alt: 'Crowd listening to a speech' })
+    expect(pickFromLibrary(person, [crowd], { ...ctx, aboutPerson: true })).toBeNull()
+  })
+})

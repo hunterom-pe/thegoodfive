@@ -203,45 +203,45 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
       }),
     )
 
-    // Choose five, then have each one's claims read against its source. A story whose claims conflict with
-    // its source is turned away and the next candidate steps in; one that cannot be confirmed holds the edition.
+    // Every story that passed the checks above gets its claims read against its source, all at once (at most
+    // eight: five plus the backups). Only a CONFIRMED story can be published. One that conflicts with its source,
+    // or that the check could not confirm, is turned away and the next candidate takes its place. If fewer than
+    // five can be confirmed, or the check itself could not run, nothing is published and an editor is asked.
     const verdicts = new Map<string, Verification>()
-    let selection = selectFive(candidates, 5)
-    for (let round = 0; round < 3 && selection.chosen.length === 5; round++) {
-      const pending = selection.chosen.filter((s) => !verdicts.has(s.id))
-      if (pending.length === 0) break
-      const budget = o.verifyBudgetMs ?? 20_000
-      const checked = await Promise.race([
-        Promise.all(pending.map(async (s) => [s.id, o.verify ? await o.verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }) : ({ verdict: 'inconclusive', issues: ['No claim verification is configured, so this story cannot be confirmed automatically.'] } as Verification)] as const)),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
-      ])
-      for (const s of pending) verdicts.set(s.id, checked ? checked.find(([id]) => id === s.id)![1] : { verdict: 'inconclusive', issues: ['The claim check timed out.'] })
-      const conflicting = pending.filter((s) => verdicts.get(s.id)!.verdict === 'contradicted')
-      if (conflicting.length === 0) break
-      for (const s of conflicting) {
-        const c = candidates.find((x) => x.item.id === s.id)!
-        c.result = { ...c.result, ok: false, failures: [...c.result.failures, { code: 'claim_contradiction', message: `Claim check: ${verdicts.get(s.id)!.issues.join(' ')}`.slice(0, 600) }] }
-      }
-      selection = selectFive(candidates, 5)
+    const unavailableCheck: Verification = { verdict: 'inconclusive', unavailable: true, issues: ['No claim verification is configured, so this story cannot be confirmed automatically.'] }
+    const toCheck = candidates.filter((c) => c.result.ok)
+    const budget = o.verifyBudgetMs ?? 20_000
+    const checked = await Promise.race([
+      Promise.all(toCheck.map(async (c) => [c.item.id, o.verify ? await o.verify({ headline: c.item.headline, summary: c.item.summary, material: c.item.sourceMaterial ?? '' }) : unavailableCheck] as const)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
+    ])
+    for (const c of toCheck) verdicts.set(c.item.id, checked?.find(([id]) => id === c.item.id)?.[1] ?? { verdict: 'inconclusive', unavailable: true, issues: ['The claim check timed out.'] })
+    const notConfirmed: NonNullable<PublishRunRecord['details']['needsReview']> = []
+    for (const c of toCheck) {
+      const v = verdicts.get(c.item.id)!
+      if (v.verdict === 'verified') continue
+      const code = v.verdict === 'contradicted' ? 'claim_contradiction' : 'claim_unconfirmed'
+      c.result = { ...c.result, ok: false, failures: [...c.result.failures, { code, message: `Claim check: ${v.issues.join(' ')}`.slice(0, 600) }] }
+      notConfirmed.push({ headline: c.item.headline, source: c.item.sourceName, verdict: v.unavailable ? 'unavailable' : v.verdict, issues: v.issues })
     }
-    const { chosen, rejected } = selection
-    const needsReview = chosen.filter((s) => verdicts.get(s.id)?.verdict !== 'verified').map((s) => ({ headline: s.headline, source: s.sourceName, verdict: verdicts.get(s.id)?.verdict ?? 'inconclusive', issues: verdicts.get(s.id)?.issues ?? ['Not checked.'] }))
+    const { chosen, rejected } = selectFive(candidates, 5)
+    const checkUnavailable = toCheck.some((c) => verdicts.get(c.item.id)?.unavailable)
     for (const s of chosen) if (s.hasPublicPhoto === false) warnings.push(`${s.headline.slice(0, 40)}: no approved photo, so it will run with geometric artwork.`)
     const details = {
       accepted: chosen.map((s) => ({ headline: s.headline, source: s.sourceName })),
       rejected: rejected.map((r) => ({ headline: r.item.headline, source: r.item.sourceName, reasons: r.reasons })),
       warnings,
-      ...(needsReview.length ? { needsReview } : {}),
+      ...(notConfirmed.length ? { needsReview: notConfirmed } : {}),
     }
 
     if (chosen.length < 5) {
-      const why = `Only ${chosen.length} of 5 stories passed verification, so nothing was published. The latest published edition stays on the site.`
+      // Held, not merely short: say whether the claim check could not run, or ran and could not confirm enough stories.
+      const why = notConfirmed.length
+        ? checkUnavailable
+          ? `Held for an editor: the claim check could not run or finish (${notConfirmed.find((n) => n.verdict === 'unavailable')?.issues[0] ?? 'unavailable'}), so ${chosen.length} of 5 stories are confirmed and nothing was published. The latest published edition stays on the site.`
+          : `Held for an editor: only ${chosen.length} of 5 stories could be confirmed against their sources (${notConfirmed.length} turned away by the claim check), so nothing was published. The latest published edition stays on the site.`
+        : `Only ${chosen.length} of 5 stories passed verification, so nothing was published. The latest published edition stays on the site.`
       await alert(`${why} ${rejected.slice(0, 3).map((r) => `"${r.item.headline.slice(0, 40)}": ${r.reasons[0]}`).join(' | ')}`)
-      return record('failed', why, details)
-    }
-    if (needsReview.length) {
-      const why = `Held for an editor: the claim check could not confirm ${needsReview.length} of the 5 stories (${needsReview.map((n) => `"${n.headline.slice(0, 40)}"`).join(', ')}), so nothing was published. The latest published edition stays on the site.`
-      await alert(why)
       return record('failed', why, details)
     }
     if (o.dryRun || o.trigger === 'check') return record('dry_run', 'All five stories pass. Automatic publishing would go ahead.', details)

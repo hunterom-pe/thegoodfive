@@ -24,7 +24,7 @@ export interface WorldState {
   /** Delay every AI answer by this many ms. */
   aiDelayMs: number
   /** The claim-by-claim check run before publishing: fine, unavailable, or finding a conflict in every story. */
-  claimCheck: 'ok' | 'down' | 'conflict'
+  claimCheck: 'ok' | 'down' | 'conflict' | 'unsure'
   /** The alert webhook: delivering, answering with an error status, or unreachable. */
   webhook: 'ok' | 'http500' | 'down'
 }
@@ -78,19 +78,19 @@ const NEGATIVE = /\b(kill|dead|death|crash|scandal|bomb|shoot|terror|tragedy|dis
  * The claim-by-claim reader. Honest like the real one has to be: a sentence is "supported" only when it is
  * really in the article, and it cites that sentence; anything else is "not_in_source".
  */
-function fakeClaimCheck(user: string, mode: 'ok' | 'conflict' | 'down'): unknown {
+function fakeClaimCheck(user: string, mode: 'ok' | 'conflict' | 'down' | 'unsure'): unknown {
   const summary = /SUMMARY: ([\s\S]*?)\n\nARTICLE TEXT:/.exec(user)?.[1] ?? ''
   const article = user.slice(user.indexOf('ARTICLE TEXT:') + 13)
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
   const claims = summary.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 3).map((claim) => {
-    const there = norm(article).includes(norm(claim))
+    const there = norm(article).includes(norm(claim)) && !(mode === 'unsure' && /turtle/i.test(summary))
     if (mode === 'conflict' && there) return { claim, verdict: 'contradicted', evidence: claim }
     return there ? { claim, verdict: 'supported', evidence: claim } : { claim, verdict: 'not_in_source', evidence: '' }
   })
   return { claims }
 }
 
-function fakeModel(body: { messages: { role: string; content: string }[]; response_format?: { json_schema?: { name?: string } } }, mode: AiMode, claimCheck: 'ok' | 'down' | 'conflict' = 'ok'): unknown {
+function fakeModel(body: { messages: { role: string; content: string }[]; response_format?: { json_schema?: { name?: string } } }, mode: AiMode, claimCheck: 'ok' | 'down' | 'conflict' | 'unsure' = 'ok'): unknown {
   const user = body.messages.find((m) => m.role === 'user')?.content ?? ''
   const name = body.response_format?.json_schema?.name
   if (name === 'claim_check') return fakeClaimCheck(user, claimCheck)

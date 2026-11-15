@@ -392,11 +392,12 @@ describe('claim verification before publishing', () => {
     const v = verdicts[headline] ?? 'verified'
     return { verdict: v, issues: v === 'verified' ? [] : [`${v}: ${headline}`] }
   }
-  it('publishes only after every story is confirmed', async () => {
+  it('publishes only confirmed stories, reading every candidate that passed the other checks in one go', async () => {
     const verify = vi.fn(confirms)
     const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
     expect((await go(store, { verify })).status).toBe('published')
-    expect(verify).toHaveBeenCalledTimes(5) // the spare is never read
+    expect(verify).toHaveBeenCalledTimes(6) // the five and the spare, together: no second round to wait for
+    expect(store.published[0].primary).toEqual(['s0', 's1', 's2', 's3', 's4'])
   })
   it('turns away a story whose claims conflict with its source and uses the next backup', async () => {
     const bad = story(1)
@@ -407,14 +408,39 @@ describe('claim verification before publishing', () => {
     expect(store.published[0].primary).toContain('b5')
     expect(out.record.details.rejected?.some((r) => r.reasons.join(' ').includes('Claim check'))).toBe(true)
   })
-  it('holds the whole edition when a story cannot be confirmed, instead of publishing it', async () => {
+  it('replaces a story the check could not confirm with a confirmed backup, instead of holding the whole edition', async () => {
     const unsure = story(2)
-    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    const store = new MemoryStore(edition([...fiveGood(), backup(5), backup(6)]))
+    const out = await go(store, { verify: claim({ [unsure.headline]: 'inconclusive' }) })
+    expect(out.status).toBe('published')
+    expect(store.published[0].primary).not.toContain('s2')
+    expect(store.published[0].primary).toContain('b5')
+    expect(out.record.details.needsReview?.[0]).toMatchObject({ verdict: 'inconclusive' })
+    expect(out.record.details.rejected?.some((r) => r.reasons.join(' ').includes('Claim check'))).toBe(true)
+  })
+  it('holds the edition when too few stories can be confirmed, and says so', async () => {
+    const unsure = story(2)
+    const store = new MemoryStore(edition(fiveGood())) // no backups to step in
     const out = await go(store, { verify: claim({ [unsure.headline]: 'inconclusive' }) })
     expect(out.status).toBe('failed')
-    expect(out.reason).toMatch(/Held for an editor/)
+    expect(out.reason).toMatch(/Held for an editor: only 4 of 5 stories could be confirmed/)
     expect(store.published).toHaveLength(0)
-    expect(out.record.details.needsReview?.[0].verdict).toBe('inconclusive')
+  })
+  it('holds the edition, naming the cause, when the claim check cannot run at all', async () => {
+    const down: ClaimVerifier = async () => ({ verdict: 'inconclusive', unavailable: true, issues: ['The claim check could not run: HTTP 500'] })
+    const store = new MemoryStore(edition([...fiveGood(), backup(5), backup(6)]))
+    const out = await go(store, { verify: down })
+    expect(out.status).toBe('failed')
+    expect(out.reason).toMatch(/Held for an editor: the claim check could not run or finish/)
+    expect(store.published).toHaveLength(0)
+    expect(out.record.details.needsReview?.every((n) => n.verdict === 'unavailable')).toBe(true)
+  })
+  it('a partial outage still publishes when five stories were confirmed', async () => {
+    const flaky: ClaimVerifier = async ({ headline }) => (headline === story(2).headline ? { verdict: 'inconclusive', unavailable: true, issues: ['timeout'] } : { verdict: 'verified', issues: [] })
+    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    const out = await go(store, { verify: flaky })
+    expect(out.status).toBe('published')
+    expect(store.published[0].primary).toContain('b5')
   })
   it('holds the edition when no verifier is configured', async () => {
     const store = new MemoryStore(edition(fiveGood()))
@@ -428,6 +454,7 @@ describe('claim verification before publishing', () => {
     const out = await go(store, { verify: slow, verifyBudgetMs: 20 })
     expect(out.status).toBe('failed')
     expect(out.record.details.needsReview?.[0].issues.join(' ')).toMatch(/timed out/)
+    expect(out.reason).toMatch(/could not run or finish/)
     expect(store.published).toHaveLength(0)
   })
   it('a dry run reports the same holds without recording anything', async () => {

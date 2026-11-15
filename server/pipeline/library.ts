@@ -20,8 +20,19 @@ export interface LibraryPhoto {
   lastUsedOn: string | null
 }
 
-const STOP = new Set('with from that this have been were will into over after their about more than other which where while there these those they them what when also year years'.split(' '))
-const tokens = (text: string): Set<string> => new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3 && !STOP.has(w)))
+const STOP = new Set('with from that this have been were will into over after their about more than other which where while there these those they them what when also year years including filled holding showing various several multiple around through standing sitting looking background foreground picture photo image close'.split(' '))
+/** Words too common to show a photo fits a story: colours, shapes, and wording that fits anything. */
+const WEAK = new Set('light water white black green blue brown field fields view views large small group lots many body under during daytime time night sunny against above below between along near open close wide long high first found study studies researchers research people world global community nature scenery urban neighbourhood yellow red pink orange brown grey gray golden colorful colourful purple power energy clean healthy'.split(' '))
+const singular = (w: string) => (w.length > 4 && w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.length > 4 && w.endsWith('es') && /(ch|sh|x|ss)es$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)
+/** Seven letters of the singular: astronomers/astronomy, turbine/turbines and telescope/telescopes meet. */
+const tokens = (text: string): Set<string> => new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3 && !STOP.has(w)).map((w) => singular(w).slice(0, 7)))
+
+/**
+ * Stories where a stock picture is likelier to jar than to help: a specific person, a child or a patient,
+ * war and death. These get a photo only when it is clearly about the story's own subject, never a
+ * general "mood" picture; otherwise the geometric artwork is the better choice.
+ */
+const SENSITIVE = /\b(infant|baby|babies|child|children|kids?|toddler|war|wartime|wwii|world war|holocaust|genocide|died|dies|death|killed|victims?|memorial|funeral|cancer|dementia|alzheimer|seizures?|epilep\w*|disabilit\w*|suicide|abuse|refugees?|hostages?|survivor)\b/i
 
 /** Days between two ISO dates (or Infinity if never used). */
 const daysSince = (date: string | null, today: string) => (date ? (Date.parse(today) - Date.parse(date)) / 86_400_000 : Infinity)
@@ -38,30 +49,55 @@ export interface PickContext {
 }
 
 /**
- * Choose the library photo that best fits a story, or none. A photo must either share subject words
- * with the story (the editor's keywords, or its description) or be marked as a good all-round picture
- * for the story's category. Photos showing people are never used for a story about a specific person.
- * A recently used photo rests, so a daily publication doesn't repeat itself, unless nothing else fits.
+ * How a story and a photo's subject words relate. Subject words an editor chose for the photo (its keywords) count for
+ * more than words that merely appear in its caption; common words (colours, "energy", "power") never count as subjects.
+ */
+export function subjectMatch(story: { headline: string; summary: string }, photo: Pick<LibraryPhoto, 'keywords' | 'alt'>, query = ''): { keyword: number; caption: number; inHeadline: number; weak: number } {
+  const headline = tokens(story.headline)
+  const wanted = tokens(`${query} ${story.headline} ${story.summary}`)
+  const keywords = tokens(photo.keywords.join(' '))
+  let keyword = 0
+  let caption = 0
+  let inHeadline = 0
+  let weak = 0
+  for (const w of new Set([...keywords, ...tokens(photo.alt)])) {
+    if (!wanted.has(w)) continue
+    if (WEAK.has(w)) {
+      weak++
+      continue
+    }
+    if (keywords.has(w)) keyword++
+    else caption++
+    if (headline.has(w)) inHeadline++
+  }
+  return { keyword, caption, inHeadline, weak }
+}
+
+/**
+ * Choose the library photo that fits a story's subject, or none (the artwork is better than a wrong picture).
+ *  - An ordinary story needs one of the photo's subject keywords in its headline, or two matching subject words anywhere.
+ *  - A sensitive story, or one about a specific person, needs a subject word in its headline AND two matching words in all.
+ *  - Failing that, an ordinary story may get a neutral picture an editor marked generic for the category (a landscape,
+ *    a skyline). Sensitive and person stories never do.
+ *  - Photos showing people are never used for a story about a specific person.
+ * Recently used photos rest unless nothing else fits.
  */
 export function pickFromLibrary(story: { category: string; headline: string; summary: string }, library: LibraryPhoto[], ctx: PickContext): LibraryPhoto | null {
-  const wanted = tokens(`${ctx.query ?? ''} ${ctx.query ?? ''} ${story.headline} ${story.summary}`)
   const rest = ctx.restDays ?? 10
+  const careful = ctx.aboutPerson || SENSITIVE.test(`${story.headline} ${story.summary}`)
   const eligible = library
     .filter((p) => !ctx.used.has(p.id) && p.categories.includes(story.category) && !(ctx.aboutPerson && p.showsPeople))
     .map((p) => {
-      const have = tokens(`${p.keywords.join(' ')} ${p.alt}`)
-      let overlap = 0
-      for (const w of wanted) if (have.has(w)) overlap++
-      // Keywords an editor chose count more than words in a caption.
-      const keyword = p.keywords.reduce((n, k) => n + (tokens(k).size && [...tokens(k)].every((w) => wanted.has(w)) ? 1 : 0), 0)
-      return { p, score: overlap + keyword * 2, rested: daysSince(p.lastUsedOn, ctx.today) >= rest }
+      const m = subjectMatch(story, p, ctx.query)
+      const strong = m.keyword + m.caption
+      const matches = careful ? m.keyword >= 1 && m.inHeadline >= 1 && strong >= 2 : m.keyword >= 1 && (m.inHeadline >= 1 || strong >= 2)
+      return { p, score: m.keyword * 3 + m.caption + m.inHeadline * 2 + m.weak, matches, rested: daysSince(p.lastUsedOn, ctx.today) >= rest }
     })
-    // A photo must fit the story's subject, or be an all-round picture for its category.
-    .filter(({ p, score }) => score >= 1 || p.generic)
-  // Prefer photos that have rested; when the library is small and all have been used lately, reuse the one
-  // used longest ago, because an unusual repeat is better than no photo. Then the best subject match.
+    .filter(({ p, matches }) => matches || (p.generic && !careful))
+  // Prefer a photo that fits the subject over a neutral one; prefer rested over recently used; a small
+  // library reuses the one used longest ago rather than showing nothing.
   const pool = eligible.some((e) => e.rested) ? eligible.filter((e) => e.rested) : eligible
-  pool.sort((a, b) => b.score - a.score || (a.p.lastUsedOn ?? '').localeCompare(b.p.lastUsedOn ?? ''))
+  pool.sort((a, b) => Number(b.matches) - Number(a.matches) || b.score - a.score || (a.p.lastUsedOn ?? '').localeCompare(b.p.lastUsedOn ?? ''))
   return pool[0]?.p ?? null
 }
 

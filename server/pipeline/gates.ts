@@ -20,7 +20,7 @@ export type FailureCode =
   | 'no_headline' | 'no_summary' | 'no_source_name' | 'url_invalid' | 'source_not_trusted' | 'source_unreachable'
   | 'undated' | 'stale' | 'future_dated' | 'insufficient_evidence' | 'numbers_unsupported' | 'quote_unsupported'
   | 'entities_unsupported' | 'weakly_grounded' | 'headline_hype' | 'headline_form' | 'summary_length'
-  | 'claim_contradiction' | 'conclusion_unsupported' | 'preliminary_unqualified' | 'not_positive' | 'sensitive_content' | 'recent_duplicate' | 'near_duplicate' | 'no_positive_assessment'
+  | 'claim_contradiction' | 'claim_unconfirmed' | 'conclusion_unsupported' | 'preliminary_unqualified' | 'not_positive' | 'sensitive_content' | 'recent_duplicate' | 'near_duplicate' | 'no_positive_assessment'
 
 export interface Failure {
   code: FailureCode
