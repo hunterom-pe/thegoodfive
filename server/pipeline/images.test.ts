@@ -110,3 +110,27 @@ describe('attaching images to a draft', () => {
     expect(originalCandidate(cand(1), [])).toBeNull()
   })
 })
+
+describe('scheduled runs and the photo library', () => {
+  const lib = [{ id: 'L1', unsplashId: 'u1', url: 'https://images.unsplash.com/photo-u1?ixid=z', alt: 'Wild bees on a meadow', credit: 'Ada Lens', creditUrl: 'https://unsplash.com/@ada', sourceUrl: 'https://unsplash.com/photos/u1', downloadLocation: 'https://api.unsplash.com/photos/u1/download?ixid=z', categories: ['nature'], keywords: ['bees', 'meadow'], generic: false, showsPeople: false, lastUsedOn: null }]
+  const bees = { ...story(1), headline: 'Wild bees return to a restored meadow', summary: 'Ecologists recorded 41 species of bee in the meadow.' }
+  it('uses an editor-saved photo without searching, approved, illustrative and credited', async () => {
+    const search = vi.fn(async () => [])
+    const download = vi.fn(async () => true)
+    const [out] = await attachImages([bees], sources(1), new Map(), { library: lib, today: '2026-11-16', search, download })
+    expect(search).not.toHaveBeenCalled()
+    expect(out).toMatchObject({ image_source: 'unsplash', image_kind: 'illustrative', image_rights_confirmed: true, image_library_id: 'L1', image_credit: 'Ada Lens' })
+    expect(out.image_credit_url).toContain('utm_source=thegoodfive')
+    expect(out.image_url).toContain('ixid=z')
+    expect(download).not.toHaveBeenCalled() // no key to send a notice with in this test
+  })
+  it('never approves the publisher’s image: with no library match the story keeps only an unapproved candidate', async () => {
+    const [out] = await attachImages([{ ...bees, category: 'health' }], sources(1), new Map(), { library: lib, today: '2026-11-16' })
+    expect(out.image_rights_confirmed).toBe(false)
+    expect(out.image_library_id).toBeNull()
+  })
+  it('gives no story a photo another story already has', async () => {
+    const out = await attachImages([bees, { ...bees, position: 2, source_url: 'https://example.org/2' }], new Map([...sources(1), ...sources(2)]), new Map(), { library: lib, today: '2026-11-16' })
+    expect(out.filter((s) => s.image_library_id === 'L1')).toHaveLength(1)
+  })
+})

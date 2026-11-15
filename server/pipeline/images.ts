@@ -1,5 +1,6 @@
 import { triggerDownload, rankPhotos, searchPhotos, toCandidate, type UnsplashPhoto } from './unsplash.ts'
 import type { ImageHint } from './article.ts'
+import { libraryCandidate, pickFromLibrary, type LibraryPhoto } from './library.ts'
 import type { Candidate, DraftStory, StoredImageCandidate } from './types.ts'
 
 export interface ImagePlan {
@@ -19,6 +20,15 @@ export interface ImageOptions {
    * Default true.
    */
   notify?: boolean
+  /** Photos an editor chose and saved. Used when no search ran (scheduled runs never search). */
+  library?: LibraryPhoto[]
+  /**
+   * Unsplash asks to be told each time a photo is used. This key is used ONLY to send that notice for a
+   * library photo; it never searches. (Scheduled runs have no search key.)
+   */
+  noticeKey?: string
+  /** The edition's date, so recently used library photos can rest. */
+  today?: string
   /** Overridable for tests. */
   search?: (query: string) => Promise<UnsplashPhoto[]>
   download?: (location: string | null | undefined) => Promise<boolean>
@@ -61,6 +71,7 @@ export async function attachImages(
   const search = options.search ?? (options.unsplashKey ? (q: string) => searchPhotos(q, options.unsplashKey!) : null)
   const download = options.download ?? ((loc: string | null | undefined) => triggerDownload(loc, options.unsplashKey ?? ''))
   const used = new Set<string>()
+  const usedLibrary = new Set<string>()
   const out: DraftStory[] = []
 
   for (const story of stories) {
@@ -92,8 +103,21 @@ export async function attachImages(
       }
     }
 
+    // No search ran (or found nothing): use a photo an editor already chose for this kind of story.
+    let fromLibrary: LibraryPhoto | null = null
+    if (!chosen && options.library?.length) {
+      fromLibrary = pickFromLibrary(story, options.library, { today: options.today ?? new Date().toISOString().slice(0, 10), used: usedLibrary, aboutPerson: Boolean(plan?.aboutPerson), query: plan?.query })
+      if (fromLibrary) {
+        usedLibrary.add(fromLibrary.id)
+        chosen = libraryCandidate(fromLibrary, app)
+        candidates.push(chosen)
+        log(`Photo for "${story.headline.slice(0, 48)}": from the library (${fromLibrary.alt.slice(0, 70)})`)
+        if (options.notify !== false && (options.download || options.noticeKey)) void (options.download ?? ((loc: string | null | undefined) => triggerDownload(loc, options.noticeKey!)))(chosen.downloadLocation).then((ok) => !ok && log(`Unsplash download notice not sent for ${chosen?.sourceUrl}`))
+      } else log(`No library photo fits "${story.headline.slice(0, 48)}"; it keeps the artwork`)
+    }
+
     const selected = chosen ?? original
-    const approved = Boolean(chosen) // only the licensed photo is cleared; the publisher's image never is
+    const approved = Boolean(chosen) // only a licensed photo is cleared; the publisher's image never is
     out.push({
       ...story,
       image_url: selected?.url ?? null,
@@ -106,6 +130,7 @@ export async function attachImages(
       image_source_url: selected?.sourceUrl ?? null,
       image_candidates: candidates.map(({ downloadLocation, ...rest }) => ({ ...rest, ...(downloadLocation ? { downloadLocation } : {}) })),
       image_rights_confirmed: approved,
+      image_library_id: fromLibrary?.id ?? null,
     })
   }
   return out

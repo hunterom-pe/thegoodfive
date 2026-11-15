@@ -74,6 +74,8 @@ export interface DraftStory {
   image_source?: string | null
   image_source_url?: string | null
   image_candidates?: StoredImageCandidate[]
+  /** Set when the photo came from the editor-curated library (so an editor has already approved it). */
+  image_library_id?: string | null
   /** True only for a licensed provider's photo whose terms cover this exact image. */
   image_rights_confirmed?: boolean
 }

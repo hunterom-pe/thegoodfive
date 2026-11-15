@@ -4,6 +4,7 @@ import { runPipeline } from './pipeline/pipeline.ts'
 import { webhookNotifier } from './alerts.ts'
 import { aiConfig } from './pipeline/gemini.ts'
 import { aiClaimVerifier, type ClaimVerifier } from './pipeline/verify.ts'
+import type { LibraryPhoto } from './pipeline/library.ts'
 
 /** Server-side configuration. None of these are ever sent to a browser. */
 export function env() {
@@ -100,6 +101,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
     const { data: recent } = await db.from('stories').select('source_url, editions!inner(edition_date)').gte('editions.edition_date', since).neq('role', 'rejected')
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
+    const library = await loadLibrary(db)
 
     // Netlify stops background functions at 15 minutes with no word. Stop ourselves first, so the run is
     // recorded as failed with a clear reason and the editor's page (which waits 16 minutes) hears about it.
@@ -107,7 +109,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`The run took longer than ${Math.round(c.runDeadlineMs / 60_000)} minutes and was stopped. Try again, or use a faster AI model.`)), c.runDeadlineMs)
     })
-    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
+    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, noticeKey: c.unsplashKey || undefined, library, today: date, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) {
       await webhookNotifier(c.alertWebhook)(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)
@@ -117,6 +119,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const { data: editionId, error } = await db.rpc('create_draft_edition', { p_date: date, p_stories: result.stories })
     if (error) throw new Error(error.message)
     if (!editionId) return await finish(db, runId, 'skipped', stats, 'The edition changed while generating, so nothing was saved.')
+    await recordLibraryUse(db, editionId as string, date, result.stories, log)
     await finish(db, runId, 'succeeded', stats)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
@@ -215,4 +218,36 @@ export function claimVerifier(): ClaimVerifier | undefined {
   const c = env()
   if (!c.aiKey) return undefined
   return aiClaimVerifier(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 18, retryDelaysMs: [1_000] }))
+}
+
+const photoFrom = (r: Record<string, unknown>): LibraryPhoto => ({
+  id: r.id as string, unsplashId: r.unsplash_id as string, url: r.url as string, alt: r.alt as string, credit: r.credit as string,
+  creditUrl: r.credit_url as string, sourceUrl: r.source_url as string, downloadLocation: (r.download_location as string | null) ?? null,
+  categories: (r.categories as string[]) ?? [], keywords: (r.keywords as string[]) ?? [], generic: Boolean(r.generic), showsPeople: Boolean(r.shows_people),
+  lastUsedOn: (r.last_used_on as string | null) ?? null,
+})
+
+/** The photos editors saved for reuse. A missing table (migration not run yet) or any error just means no library. */
+export async function loadLibrary(db: SupabaseClient): Promise<LibraryPhoto[]> {
+  const { data, error } = await db.from('photo_library').select('*').eq('active', true)
+  if (error) {
+    console.log(`Photo library unavailable: ${error.message}`)
+    return []
+  }
+  return (data ?? []).map(photoFrom)
+}
+
+/**
+ * A photo an editor saved to the library was already approved by that editor, so the story it was given
+ * to carries that approval (this is what lets it appear in an automatically published edition). Also
+ * records the use, so the photo rests before it appears again.
+ */
+async function recordLibraryUse(db: SupabaseClient, editionId: string, date: string, stories: { source_url: string; image_library_id?: string | null }[], log: (line: string) => void) {
+  const used = stories.filter((s) => s.image_library_id)
+  for (const s of used) {
+    const { error } = await db.from('stories').update({ image_editor_approved: true }).eq('edition_id', editionId).eq('source_url', s.source_url)
+    if (error) log(`Could not mark a library photo as approved: ${error.message}`)
+    const { data: row } = await db.from('photo_library').select('use_count').eq('id', s.image_library_id!).single()
+    await db.from('photo_library').update({ last_used_on: date, use_count: ((row?.use_count as number | undefined) ?? 0) + 1 }).eq('id', s.image_library_id!)
+  }
 }
