@@ -3,9 +3,20 @@
 -- also use: an edit that made a source too old after it was checked could still be published. Version 2 covers
 -- every input the checks use. The application computes the same value (server/autopublish.ts, contentHash).
 --
--- Order: safe either way. This migration accepts BOTH versions, so it can be applied before or after the code.
--- Recommended: apply this, then deploy the code. Once the version-2 code is live, version 1 can be removed
--- (a later migration that drops the '1' branch). Rollback: supabase/rollbacks/20261118000000_fingerprint_v2_down.sql.
+-- REQUIRED ORDER (the new code always sends version-2 fingerprints; the old database cannot check them):
+--   1. Apply THIS migration.
+--   2. Verify it (both must be true):
+--        select to_regprocedure('public.story_content_hash_v2(public.stories)') is not null;
+--        select pg_get_functiondef('public.auto_publish_edition(uuid,date,uuid[],jsonb,jsonb)'::regprocedure)
+--               like '%story_content_hash_v2%';
+--   3. Deploy the new code.
+-- Code already deployed before this migration (round 2, commit 75fb325, version-1 fingerprints) keeps working
+-- after step 1: this function still accepts version 1, so there is no gap between steps 1 and 3.
+-- If the new code is deployed WITHOUT this migration, every automatic publication is refused as "edited after
+-- it was checked" (the old function compares a version-1 value with a version-2 one): nothing publishes, an
+-- alert is sent, and the latest edition stays up. That fails closed, but no edition goes out until step 1.
+-- Once the new code is live, a later migration can drop the version-1 branch.
+-- Rollback: supabase/rollbacks/20261118000000_fingerprint_v2_down.sql (redeploy version-1 code FIRST).
 
 create or replace function public.story_content_hash_v2(s public.stories) returns text
 language sql immutable set search_path = '' as $$

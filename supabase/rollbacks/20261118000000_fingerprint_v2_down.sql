@@ -1,6 +1,10 @@
 -- Roll back 20261118000000_fingerprint_v2.sql: the publish function compares version-1 fingerprints only.
--- Deploy code that sends version 1 (commit 75fb325 or earlier) BEFORE running this, or publishing fails closed
--- (every run reports "edited after it was checked" and publishes nothing).
+-- REQUIRED ORDER:
+--   1. Redeploy code that sends version-1 fingerprints (commit 75fb325). It works with the migrated database.
+--   2. Run this file.
+--   3. Verify: select to_regprocedure('public.story_content_hash_v2(public.stories)') is null;
+-- Running this while version-2 code is still deployed stops automatic publication (every run is refused as
+-- "edited after it was checked", nothing publishes, an alert is sent) until step 1 is done.
 create or replace function public.auto_publish_edition(
   p_edition uuid,
   p_date date,

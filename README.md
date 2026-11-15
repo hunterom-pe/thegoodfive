@@ -130,3 +130,18 @@ npm run draft      # dry run of the news pipeline (saves nothing)
 
 ## Claim checks before automatic publishing
 `server/pipeline/claims.ts` catches common slips (negation, opposites, reversed roles, units and rates, causes and absolutes the source never states). `server/pipeline/verify.ts` then has an AI reader go through each claim and cite the source sentence that supports it; every cited sentence must really be in the retrieved text. A story whose claims conflict is dropped for the next candidate; one that can't be confirmed (or a check that fails or times out, or no AI key) **holds the whole edition for an editor**. This is stronger than word overlap, not a guarantee of truth.
+
+## Deploying fingerprint version 2 (migration `20261118000000`)
+The publisher fingerprints every input the checks use (now including the source's publication time and the positive assessment) and the database refuses to publish a story whose fingerprint changed after checking. The new code always sends **version-2** fingerprints, which the old database cannot check, so the order matters:
+
+1. **Apply** `supabase/migrations/20261118000000_fingerprint_v2.sql` in the Supabase SQL Editor.
+2. **Verify** both return `true`:
+   ```sql
+   select to_regprocedure('public.story_content_hash_v2(public.stories)') is not null;
+   select pg_get_functiondef('public.auto_publish_edition(uuid,date,uuid[],jsonb,jsonb)'::regprocedure) like '%story_content_hash_v2%';
+   ```
+3. **Deploy** the new code.
+
+The code already live (`75fb325`, version 1) keeps publishing after step 1, because the migrated function accepts both versions. Tested matrix (`e2e/deploy-compat.test.ts`): old code + old database, old code + migrated database and new code + migrated database all publish; **new code + old database publishes nothing**: every run is refused as "edited after it was checked", an alert is sent and the latest edition stays up, until step 1 is done.
+
+**Rollback:** redeploy `75fb325` first, then run `supabase/rollbacks/20261118000000_fingerprint_v2_down.sql`, then check `select to_regprocedure('public.story_content_hash_v2(public.stories)') is null;`. Running the rollback while version-2 code is live stops automatic publication the same way.

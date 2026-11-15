@@ -64,10 +64,10 @@ export function AboutPage() {
             Every morning, software searches a global news index and a list of credible outlets. It sets aside duplicates, and an AI model picks stories that look genuinely positive, significant, recent and well sourced. It then writes a short summary of each, using only what the original report says.
           </p>
           <p>
-            Then come the checks. Software confirms the source is real, trusted and recent, and that every figure, name and quotation in a summary appears in the article. It looks for the usual slips: a number with the wrong unit, a claim turned into its opposite, two people swapped, or a cause the article never gives. A second AI reading then goes through each claim and has to point to the exact sentence that supports it.
+            Then come the checks. Software confirms the source is real, trusted and recent, and that every figure, name and quotation in a summary appears in the article. It looks for the usual slips: a number with the wrong unit, a claim turned into its opposite, two people swapped, or a cause the article never gives. A second AI reading then goes through every part of every sentence and has to point to the exact sentence in the article that supports it.
           </p>
           <p>
-            If a story’s claims conflict with its source, it is dropped and another steps in. If a story can’t be confirmed, or the checks can’t run, the whole edition is held for an editor instead of being published. If everything passes, it publishes by itself.
+            If a story’s claims conflict with its source, or any part of it can’t be confirmed, that story is dropped and a backup that has been confirmed takes its place. If fewer than five stories can be confirmed, or the checks can’t run, the edition is held for an editor instead of being published. When five pass, it publishes by itself.
           </p>
           <p>
             None of this is a guarantee. The checks compare a summary with its source; they can’t tell whether the source itself is right, and AI can still make mistakes. An editor can review, change or pull any edition at any time, and when we get something wrong we correct it and say so.

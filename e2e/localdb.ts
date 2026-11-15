@@ -27,7 +27,8 @@ const bin = (name: string) => {
 }
 export const postgresAvailable = () => Boolean(bin('initdb') && bin('pg_ctl') && bin('psql'))
 
-export function startPg(): PgInstance {
+/** `skipMigrations` builds an older schema, e.g. to test new code against a database not yet migrated. */
+export function startPg(options: { skipMigrations?: string[] } = {}): PgInstance {
   const dir = mkdtempSync(join(tmpdir(), 'goodfive-e2e-'))
   const env = { ...process.env, LC_ALL: 'en_US.UTF-8' }
   execFileSync('initdb', ['-D', join(dir, 'data'), '-U', 'postgres'], { env, stdio: 'ignore' })
@@ -57,7 +58,7 @@ export function startPg(): PgInstance {
   }
   try {
     run(readFileSync(join(ROOT, 'supabase/tests/local_shim.sql'), 'utf8'))
-    for (const f of readdirSync(join(ROOT, 'supabase/migrations')).sort()) run(readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8'))
+    for (const f of readdirSync(join(ROOT, 'supabase/migrations')).sort().filter((f) => !options.skipMigrations?.includes(f))) run(readFileSync(join(ROOT, 'supabase/migrations', f), 'utf8'))
   } catch (e) {
     pg.stop() // never leave a stray database running if setup fails
     throw e
