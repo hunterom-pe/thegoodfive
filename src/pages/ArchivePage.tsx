@@ -9,7 +9,8 @@ import { two } from '../components/StoryParts'
 import { publicRepo } from '../data/publicRepo'
 import { CATEGORIES } from '../lib/categories'
 import { formatMonthYear, todayISO } from '../lib/dates'
-import { useAsync, useTitle } from '../lib/hooks'
+import { useAsync, usePageMeta } from '../lib/hooks'
+import { metaForPath } from '../lib/meta'
 import type { EditionSummary } from '../lib/types'
 
 const weekday = (date: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${date}T12:00:00Z`))
@@ -47,7 +48,7 @@ function EditionRow({ edition, isToday }: { edition: EditionSummary; isToday: bo
 }
 
 export function ArchivePage() {
-  useTitle('Archive')
+  usePageMeta(metaForPath('/archive'))
   const [state, retry] = useAsync(() => publicRepo.archive(), 'archive')
   const today = todayISO()
 

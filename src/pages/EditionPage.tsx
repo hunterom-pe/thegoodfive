@@ -5,15 +5,16 @@ import { SiteFooter } from '../components/SiteFooter'
 import { SiteHeader } from '../components/SiteHeader'
 import { StoryProgress } from '../components/StoryProgress'
 import { publicRepo } from '../data/publicRepo'
-import { formatLong, isISODate, todayISO } from '../lib/dates'
-import { useAsync, useTitle } from '../lib/hooks'
+import { isISODate, todayISO } from '../lib/dates'
+import { useAsync, usePageMeta } from '../lib/hooks'
+import { metaForPath } from '../lib/meta'
 
 export function EditionPage() {
   const { date = '' } = useParams()
   const valid = isISODate(date)
   const [state, retry] = useAsync(() => (valid ? publicRepo.byDate(date) : Promise.resolve(null)), `edition:${date}`)
   const edition = state.status === 'ready' ? state.data : null
-  useTitle(valid ? formatLong(date) : 'Edition not found')
+  usePageMeta(metaForPath(`/edition/${date}`, valid ? { date, headlines: edition?.stories.map((s) => s.headline), exists: state.status === 'ready' ? Boolean(edition) : undefined } : null))
 
   const back = (
     <Link to="/archive" className="btn">

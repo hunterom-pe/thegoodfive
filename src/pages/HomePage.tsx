@@ -5,10 +5,11 @@ import { SiteHeader } from '../components/SiteHeader'
 import { StoryProgress } from '../components/StoryProgress'
 import { publicRepo } from '../data/publicRepo'
 import { todayISO } from '../lib/dates'
-import { useAsync, useTitle } from '../lib/hooks'
+import { useAsync, usePageMeta } from '../lib/hooks'
+import { metaForPath } from '../lib/meta'
 
 export function HomePage() {
-  useTitle('')
+  usePageMeta(metaForPath('/'))
   const [state, retry] = useAsync(() => publicRepo.latest(), 'latest')
   const edition = state.status === 'ready' ? state.data : null
   return (

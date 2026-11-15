@@ -4,7 +4,8 @@ import { FiveSquares, wrap } from '../components/Brand'
 import { SiteFooter } from '../components/SiteFooter'
 import { SiteHeader } from '../components/SiteHeader'
 import { IS_DEMO } from '../lib/config'
-import { useTitle } from '../lib/hooks'
+import { usePageMeta } from '../lib/hooks'
+import { metaForPath } from '../lib/meta'
 
 function Section({ id, n, title, children }: { id: string; n: string; title: string; children: ReactNode }) {
   return (
@@ -27,7 +28,7 @@ const KINDS = [
 ]
 
 export function AboutPage() {
-  useTitle('About')
+  usePageMeta(metaForPath('/about'))
   return (
     <>
       <SiteHeader />

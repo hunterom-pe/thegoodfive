@@ -48,7 +48,8 @@
     outline-offset: 3px;
   }
   /* Programmatic focus (the skip link) moves the reader to the content without a ring around the whole page. */
-  main:focus {
+  main:focus,
+  [tabindex='-1']:focus {
     outline: none;
   }
   /* On the forest-green closing page the default green ring would vanish. */
