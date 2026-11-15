@@ -43,4 +43,4 @@ async function lookup(date: string): Promise<EditionFacts | null> {
   }
 }
 
-export const config = { path: ['/', '/about', '/archive', '/edition/*'] }
+export const config = { path: ['/', '/about', '/archive', '/saved', '/edition/*'] }

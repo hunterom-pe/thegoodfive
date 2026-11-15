@@ -31,7 +31,7 @@ export function EditionPreview() {
         {state.status === 'loading' && <p className="label p-8 text-earth">Building preview…</p>}
         {state.status === 'error' && <p className="p-8 text-earth">{state.error}</p>}
         {state.status === 'ready' && !edition && <p className="p-8">That edition doesn’t exist.</p>}
-        {edition && <EditionView edition={edition} context={edition.date < todayISO() ? 'archive' : 'today'} />}
+        {edition && <EditionView edition={edition} context={edition.date < todayISO() ? 'archive' : 'today'} interactive={false} />}
       </main>
       <SiteFooter />
     </>

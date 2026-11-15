@@ -89,12 +89,38 @@
     line-height: 1.2;
     text-transform: uppercase;
   }
-  /* The reading-progress squares. Explicit media queries (not stacked utility variants, whose order decides which wins):
-     400px and wider shows 24px-wide links, 370-399px shows a quiet indicator, narrower shows neither. */
+  /* Edition navigation, one per width range (explicit media queries, so no utility-order surprises):
+       under 1024px  the story strip, a second row of the sticky header with five full-width targets;
+       1024-1439px   the five squares in the header;
+       1440px and up the contents rail in the left margin: only from there is the margin left of the 72rem
+                     column wide enough for the 8.5rem rail plus a clear gap (>= 24px) before text AND photos,
+                     which sit slightly wider than the text while they scale in. */
   .progress-links { display: none; }
-  .progress-dots { display: none; }
-  @media (min-width: 400px) { .progress-links { display: flex; } }
-  @media (min-width: 370px) and (max-width: 399.98px) { .progress-dots { display: flex; } }
+  .story-strip { display: block; }
+  .contents-rail { display: none; }
+  @media (min-width: 1024px) {
+    .story-strip { display: none; }
+    .progress-links { display: flex; }
+  }
+  @media (min-width: 1440px) {
+    .progress-links { display: none; }
+    .contents-rail {
+      display: block;
+      position: fixed;
+      top: 7rem;
+      /* The free margin left of the 72rem reading column, minus a gap: the rail never reaches the text. */
+      left: max(1rem, calc((100vw - 72rem) / 2 - 9.5rem));
+      width: 8.5rem;
+      z-index: 30;
+      transition: opacity 200ms ease;
+    }
+    /* Over the dark back cover the rail steps aside. */
+    .contents-rail.is-past { opacity: 0; pointer-events: none; visibility: hidden; }
+  }
+  /* The strip makes the sticky header taller: anchors and "continue" must land below it. */
+  @media (max-width: 1023.98px) {
+    html:has(.story-strip) { scroll-padding-top: 7.25rem; }
+  }
   .prose-story {
     font-size: 1.0625rem;
     line-height: 1.62;

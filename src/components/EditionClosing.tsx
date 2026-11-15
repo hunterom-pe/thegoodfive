@@ -4,13 +4,14 @@ import type { PublicEdition } from '../lib/types'
 import { FiveSquares, wrap } from './Brand'
 import type { EditionContext } from './EditionHero'
 import { Reveal } from './Reveal'
+import { TakeOne } from './TakeOne'
 
-/** The back cover. Five squares, three lines, and nothing asking for anything. */
+/** The back cover. Five squares, three lines, and one optional question. Nothing asks the reader to come back. */
 export function EditionClosing({ edition, context }: { edition: PublicEdition; context: EditionContext }) {
   const kicker =
     context === 'today' ? 'That’s your five for today.' : context === 'latest' ? 'That’s the latest five.' : `That was the five for ${formatWeekday(edition.date)}.`
   return (
-    <section aria-label="End of edition" className="on-dark bg-forest text-chalk">
+    <section aria-label="End of edition" data-edition-end className="on-dark bg-forest text-chalk">
       <div className={`${wrap} pb-8 pt-20 lg:pb-10 lg:pt-36`}>
         <Reveal variant="closing">
           <FiveSquares onDark size={14} gap={7} />
@@ -31,6 +32,7 @@ export function EditionClosing({ edition, context }: { edition: PublicEdition; c
             )}
           </p>
         </Reveal>
+        <TakeOne edition={edition} />
         <div className="label mt-20 flex items-center justify-between gap-4 border-t border-chalk/25 pt-5 text-chalk/70 lg:mt-32">
           <span>The Good Five</span>
           <time dateTime={edition.date} className="text-right">

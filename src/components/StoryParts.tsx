@@ -5,6 +5,7 @@ import { formatShort } from '../lib/dates'
 import type { PublicStory } from '../lib/types'
 import { Arrow } from './Brand'
 import { StoryArt } from './StoryArt'
+import { SaveButton } from './ReaderTools'
 
 export const two = (n: number) => String(n).padStart(2, '0')
 
@@ -110,6 +111,7 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
           {chip}
         </a>
       )}
+      <SaveButton story={story} className="ml-0 block" />
     </div>
   )
 }

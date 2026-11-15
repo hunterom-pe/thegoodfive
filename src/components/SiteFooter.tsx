@@ -24,6 +24,9 @@ export function SiteFooter() {
             <Link to="/about" className={link}>
               About
             </Link>
+            <Link to="/saved" className={link}>
+              Saved stories
+            </Link>
             <Link to="/about#method" className={link}>
               How we choose
             </Link>

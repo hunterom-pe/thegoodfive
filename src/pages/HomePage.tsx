@@ -3,6 +3,7 @@ import { PageLoading, PageMessage } from '../components/PageStates'
 import { SiteFooter } from '../components/SiteFooter'
 import { SiteHeader } from '../components/SiteHeader'
 import { StoryProgress } from '../components/StoryProgress'
+import { StoryStrip } from '../components/ReaderTools'
 import { publicRepo } from '../data/publicRepo'
 import { todayISO } from '../lib/dates'
 import { useAsync, usePageMeta } from '../lib/hooks'
@@ -14,7 +15,7 @@ export function HomePage() {
   const edition = state.status === 'ready' ? state.data : null
   return (
     <>
-      <SiteHeader progress={edition ? <StoryProgress count={edition.stories.length} /> : null} />
+      <SiteHeader progress={edition ? <StoryProgress count={edition.stories.length} /> : null} strip={edition ? <StoryStrip stories={edition.stories} /> : null} />
       <main>
         {state.status === 'loading' && <PageLoading />}
         {state.status === 'error' && (

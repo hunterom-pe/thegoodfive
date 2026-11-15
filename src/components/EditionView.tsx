@@ -4,6 +4,7 @@ import { wrap } from './Brand'
 import { EditionClosing } from './EditionClosing'
 import { EditionHero, type EditionContext } from './EditionHero'
 import { FeaturedStory } from './FeaturedStory'
+import { ContentsRail, ReaderProvider, ResumeReading } from './ReaderTools'
 import { StorySection, type StoryVariant } from './StorySection'
 
 /** Stories two to five each get their own composition, in a fixed rhythm. */
@@ -26,10 +27,12 @@ export function DemoNotice() {
 }
 
 /** One complete edition on one continuous page: hero, five stories, back cover. */
-export function EditionView({ edition, context }: { edition: PublicEdition; context: EditionContext }) {
+export function EditionView({ edition, context, interactive = true }: { edition: PublicEdition; context: EditionContext; interactive?: boolean }) {
   const [lead, ...rest] = edition.stories
   return (
-    <>
+    <ReaderProvider value={{ edition, interactive }}>
+      <ResumeReading />
+      <ContentsRail stories={edition.stories} />
       {edition.isDemo && <DemoNotice />}
       <EditionHero edition={edition} context={context} />
       {lead && <FeaturedStory story={lead} isDemo={edition.isDemo} />}
@@ -37,6 +40,6 @@ export function EditionView({ edition, context }: { edition: PublicEdition; cont
         <StorySection key={story.id} story={story} isDemo={edition.isDemo} variant={RHYTHM[i % RHYTHM.length]} />
       ))}
       <EditionClosing edition={edition} context={context} />
-    </>
+    </ReaderProvider>
   )
 }

@@ -5,7 +5,7 @@ import { BrandMark, wrap } from './Brand'
 const navLink = ({ isActive }: { isActive: boolean }) =>
   `label flex h-11 items-center transition-colors hover:text-forest ${isActive ? 'text-forest' : 'text-ink/70'}`
 
-export function SiteHeader({ progress }: { progress?: ReactNode }) {
+export function SiteHeader({ progress, strip }: { progress?: ReactNode; strip?: ReactNode }) {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-chalk">
       <div className={`${wrap} flex h-14 items-center justify-between gap-2 sm:gap-4`}>
@@ -19,12 +19,16 @@ export function SiteHeader({ progress }: { progress?: ReactNode }) {
             <NavLink to="/archive" className={navLink}>
               Archive
             </NavLink>
+            <NavLink to="/saved" className={(s) => `${navLink(s)} max-sm:hidden`}>
+              Saved
+            </NavLink>
             <NavLink to="/about" className={(s) => `${navLink(s)} max-sm:hidden`}>
               About
             </NavLink>
           </nav>
         </div>
       </div>
+      {strip}
     </header>
   )
 }

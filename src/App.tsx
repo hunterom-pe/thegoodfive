@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage'
 const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })))
 const ArchivePage = lazy(() => import('./pages/ArchivePage').then((m) => ({ default: m.ArchivePage })))
 const EditionPage = lazy(() => import('./pages/EditionPage').then((m) => ({ default: m.EditionPage })))
+const SavedPage = lazy(() => import('./pages/SavedPage').then((m) => ({ default: m.SavedPage })))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })))
 
 // The editor (and the Supabase auth client it needs) is a separate chunk
@@ -98,6 +99,7 @@ export default function App() {
           <Route path="/archive" element={<ArchivePage />} />
           <Route path="/edition/:date" element={<EditionPage />} />
           <Route path="/about" element={<AboutPage />} />
+          <Route path="/saved" element={<SavedPage />} />
           <Route
             path="/editor/*"
             element={

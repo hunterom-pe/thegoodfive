@@ -63,6 +63,14 @@ export function metaForPath(pathname: string, edition?: EditionFacts | null): Pa
       canonical: `${SITE}/archive`,
       noindex: false,
     }
+  if (path === '/saved')
+    return {
+      title: 'Saved stories — The Good Five',
+      shareTitle: 'Saved stories',
+      description: 'Stories you saved from The Good Five. They stay on this device and browser.',
+      canonical: `${SITE}/saved`,
+      noindex: true, // personal to each reader's browser: nothing here for search engines
+    }
   const m = /^\/edition\/([^/]+)$/.exec(path)
   if (m) {
     const date = m[1]

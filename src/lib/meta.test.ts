@@ -83,3 +83,11 @@ describe('special characters in metadata', () => {
     expect(tag(out, /name="description"\s+content="([^"]*)"/)).toContain('Town raises $1 million for clean water')
   })
 })
+
+describe('the saved-stories page', () => {
+  it('has its own title and canonical address, and is kept out of search results (it is personal to each browser)', () => {
+    const m = metaForPath('/saved')
+    expect(m).toMatchObject({ title: 'Saved stories — The Good Five', canonical: `${SITE}/saved`, noindex: true })
+    expect(applyMeta(html, m)).toContain('<meta name="robots" content="noindex, follow" />')
+  })
+})
