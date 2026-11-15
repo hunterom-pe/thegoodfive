@@ -94,11 +94,13 @@ export function pickFromLibrary(story: { category: string; headline: string; sum
       return { p, score: m.keyword * 3 + m.caption + m.inHeadline * 2 + m.weak, matches, rested: daysSince(p.lastUsedOn, ctx.today) >= rest }
     })
     .filter(({ p, matches }) => matches || (p.generic && !careful))
-  // Prefer a photo that fits the subject over a neutral one; prefer rested over recently used; a small
-  // library reuses the one used longest ago rather than showing nothing.
-  const pool = eligible.some((e) => e.rested) ? eligible.filter((e) => e.rested) : eligible
-  pool.sort((a, b) => Number(b.matches) - Number(a.matches) || b.score - a.score || (a.p.lastUsedOn ?? '').localeCompare(b.p.lastUsedOn ?? ''))
-  return pool[0]?.p ?? null
+  // Order, strictly: (1) a photo that fits the story's subject beats any neutral one, even if it was used
+  // recently; (2) within the same tier, a rested photo beats a recently used one; (3) then the closer subject
+  // match; (4) then the one used longest ago (never used counts as longest). A small library therefore
+  // repeats a relevant photo before it falls back to a neutral one.
+  const lastUsed = (p: LibraryPhoto) => p.lastUsedOn ?? ''
+  eligible.sort((a, b) => Number(b.matches) - Number(a.matches) || Number(b.rested) - Number(a.rested) || b.score - a.score || lastUsed(a.p).localeCompare(lastUsed(b.p)))
+  return eligible[0]?.p ?? null
 }
 
 /** The stored candidate for a library photo, labelled illustrative like every other stock photo. */

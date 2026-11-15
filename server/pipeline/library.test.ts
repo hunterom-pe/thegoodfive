@@ -88,3 +88,33 @@ describe('relevance rules', () => {
     expect(pickFromLibrary(person, [crowd], { ...ctx, aboutPerson: true })).toBeNull()
   })
 })
+
+describe('ordering: relevance first, then rest, then least recent use', () => {
+  const today = { today: '2026-11-15', used: new Set<string>(), aboutPerson: false }
+  const telescopeStory = { category: 'science', headline: 'New telescope observatory opens for local astronomers', summary: 'Astronomers opened a telescope observatory.' }
+  const telescope = (id: string, lastUsedOn: string | null) => photo(id, { categories: ['science'], alt: 'Telescope observatory beneath stars', keywords: ['telescope', 'observatory'], lastUsedOn })
+  const neutral = (id: string, lastUsedOn: string | null) => photo(id, { categories: ['science'], alt: 'Neutral landscape', keywords: [], generic: true, lastUsedOn })
+  it('the audit case: a relevant photo used yesterday beats a never-used neutral one', () => {
+    expect(pickFromLibrary(telescopeStory, [telescope('match', '2026-11-14'), neutral('generic', null)], today)?.id).toBe('match')
+  })
+  it('within the relevant tier, a rested photo beats a recently used one', () => {
+    expect(pickFromLibrary(telescopeStory, [telescope('recent', '2026-11-14'), telescope('rested', '2026-10-01')], today)?.id).toBe('rested')
+  })
+  it('among recently used relevant photos, the one used longest ago wins', () => {
+    expect(pickFromLibrary(telescopeStory, [telescope('yesterday', '2026-11-14'), telescope('lastweek', '2026-11-08')], today)?.id).toBe('lastweek')
+  })
+  it('a never-used relevant photo beats a used one', () => {
+    expect(pickFromLibrary(telescopeStory, [telescope('used', '2026-10-01'), telescope('fresh', null)], today)?.id).toBe('fresh')
+  })
+  it('with no relevant photo, neutral ones follow the same rest and recency rules', () => {
+    expect(pickFromLibrary(telescopeStory, [neutral('n-recent', '2026-11-14'), neutral('n-rested', '2026-09-01')], today)?.id).toBe('n-rested')
+  })
+  it('the safeguards still hold: a sensitive story never falls back to a neutral photo, however rested', () => {
+    const sensitive = { category: 'science', headline: 'Infant recovers after rare treatment', summary: 'An infant recovered after treatment.' }
+    expect(pickFromLibrary(sensitive, [neutral('n', null)], today)).toBeNull()
+  })
+  it('the safeguards still hold: a story about a person never gets a photo showing people, even a relevant recent one', () => {
+    const p = photo('people', { categories: ['science'], alt: 'Astronomers at a telescope observatory', keywords: ['telescope', 'observatory'], showsPeople: true, lastUsedOn: null })
+    expect(pickFromLibrary(telescopeStory, [p], { ...today, aboutPerson: true })).toBeNull()
+  })
+})
