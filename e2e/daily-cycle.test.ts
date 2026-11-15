@@ -390,12 +390,20 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
 
   it('with the starter library installed, every story gets a credited photo and the published edition shows five photos', async () => {
     seedPublished(YESTERDAY)
-    pg.exec(readFileSync(join(process.cwd(), 'supabase/seeds/photo_library_seed.sql'), 'utf8')) // the real starter library, exactly as a person would run it
+    // The real starter library, then its curation, exactly as a person would run them.
+    pg.exec(readFileSync(join(process.cwd(), 'supabase/seeds/photo_library_seed.sql'), 'utf8'))
+    pg.exec(readFileSync(join(process.cwd(), 'supabase/seeds/photo_library_curation.sql'), 'utf8'))
     await scheduledDraft('schedule', { db })
     const generation = await waitForGeneration()
     expect(generation.status, String(generation.error)).toBe('succeeded')
     const out = await scheduledPublish('schedule', { db })
     expect(out?.status, out?.reason).toBe('published')
+    // Relevance, not just coverage: each photo must fit its story, and a mismatched picture is worse than none.
+    const given = pg.query(`select s.headline, coalesce(s.image_alt, '') as alt from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.role = 'primary'`) as { headline: string; alt: string }[]
+    const altFor = (re: RegExp) => given.find((g) => re.test(g.headline))?.alt ?? ''
+    expect(altFor(/library van/i)).toMatch(/books|library/i)
+    expect(altFor(/salmon/i)).toMatch(/river/i)
+    for (const g of given) expect(g.alt, g.headline).not.toMatch(/coral|textile|vegetable|pill|heart|floral/i)
     const shown = pg.query(`select image_url, image_credit, image_kind from public.public_stories where image_url is not null`, 'anon') as { image_credit: string; image_kind: string }[]
     expect(shown).toHaveLength(5)
     for (const s of shown) expect(s).toMatchObject({ image_kind: 'illustrative' })

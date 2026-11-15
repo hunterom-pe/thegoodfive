@@ -269,7 +269,7 @@ export function PhotoPanel({
                         disabled={disabled || saved[c.url] === 'saved'}
                         onClick={async () => {
                           try {
-                            await saveToLibrary(c, story.category, `${query} ${story.headline}`)
+                            await saveToLibrary(c, story.category, query)
                             setSaved((s) => ({ ...s, [c.url]: 'saved' }))
                           } catch (e) {
                             setSaved((s) => ({ ...s, [c.url]: e instanceof Error ? e.message : 'Could not save.' }))

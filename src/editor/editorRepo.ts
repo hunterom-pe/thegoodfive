@@ -374,7 +374,9 @@ const supabaseRepo: EditorRepo = {
   async saveToLibrary(photo, category, keywords) {
     const id = photo.url.match(/photo-([\w-]+)/)?.[1] ?? photo.sourceUrl?.split('/').pop()?.split('?')[0]
     if (!id || photo.source !== 'unsplash' || !photo.creditUrl || !photo.sourceUrl || !photo.credit) throw new Error('Only a photo found through the Unsplash search can be saved to the library.')
-    const words = [...new Set(keywords.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3))]
+    // What the photo shows: the words the editor searched with plus its own description. Never the story's headline,
+    // or the photo would claim to fit every future story that happens to share a word with it.
+    const words = [...new Set(`${keywords} ${photo.alt ?? ''}`.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3))]
     const { data: session } = await supabase!.auth.getSession()
     const strip = (u: string) => { const x = new URL(u); x.searchParams.delete('utm_source'); x.searchParams.delete('utm_medium'); return x.toString() }
     const { error } = await supabase!.from('photo_library').upsert(
