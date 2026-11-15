@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "The Good Five \u2014 five good things, every day.",
+  "description": "The Good Five — five good things, every day.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -24,7 +24,7 @@
     "fast-xml-parser": "^5.12.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^6.30.6"
+    "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
     "@netlify/functions": "^6.1.1",
