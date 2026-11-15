@@ -149,6 +149,15 @@ export function AutomationPanel() {
             </>
           )}
         </Row>
+        <Row label="Photos">
+          {s.libraryCount === null ? 'Photo library not set up yet (run the newest migration).' : (
+            <>
+              {s.libraryCount} photo{s.libraryCount === 1 ? '' : 's'} in the library for automatic editions.
+              {s.libraryCount < 15 && <span className="block text-earth">Fewer than 15: save more from a story’s photo search so stories can be matched.</span>}
+              {s.today && s.today.withoutPhoto > 0 && <span className="block text-earth">Today’s draft: {s.today.withoutPhoto} of {s.today.primary} stories have no approved photo and would show artwork.</span>}
+            </>
+          )}
+        </Row>
         <Row label="Failure alerts">{s.config === null ? 'Unknown here.' : s.config.alertsConfigured ? 'On: a message is sent to your webhook when something fails.' : 'Off. Add ALERT_WEBHOOK_URL to be told when something fails.'}</Row>
       </dl>
 

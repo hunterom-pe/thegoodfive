@@ -64,6 +64,7 @@ export function PhotoPanel({
   imageDirty,
   onSaveManual,
   searchPhotos,
+  saveToLibrary,
 }: {
   /** The saved story: status and provenance always reflect what is stored. */
   story: EditorStory
@@ -78,7 +79,10 @@ export function PhotoPanel({
   onSaveManual: () => Promise<void>
   /** An editor's own photo search. Absent when searching is unavailable. */
   searchPhotos?: (query: string) => Promise<ImageCandidate[]>
+  /** Save a photo for scheduled editions to reuse. Absent when unavailable. */
+  saveToLibrary?: (photo: ImageCandidate, category: string, keywords: string) => Promise<void>
 }) {
+  const [saved, setSaved] = useState<Record<string, 'saved' | string>>({})
   const [confirm, setConfirm] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ImageCandidate[] | null>(null)
@@ -223,7 +227,7 @@ export function PhotoPanel({
       {searchPhotos && (
         <div className="mt-5 border-t border-line pt-4">
           <p className="label text-earth">Find a licensed photo</p>
-          <p className="mt-1 text-[0.8125rem] text-ink/70">Search Unsplash yourself and choose the photo. Photos are labelled illustrative and credited automatically.</p>
+          <p className="mt-1 text-[0.8125rem] text-ink/70">Search Unsplash yourself and choose the photo. Photos are labelled illustrative and credited automatically. “Save to library” also makes a photo available to future automatic editions for stories in this category.</p>
           <form
             className="mt-2 flex gap-2"
             onSubmit={(e) => {
@@ -258,6 +262,28 @@ export function PhotoPanel({
                     >
                       Use this photo
                     </button>
+                    {saveToLibrary && (
+                      <button
+                        type="button"
+                        className="ml-3 mt-1 min-h-11 font-semibold text-forest underline underline-offset-4 disabled:opacity-40"
+                        disabled={disabled || saved[c.url] === 'saved'}
+                        onClick={async () => {
+                          try {
+                            await saveToLibrary(c, story.category, `${query} ${story.headline}`)
+                            setSaved((s) => ({ ...s, [c.url]: 'saved' }))
+                          } catch (e) {
+                            setSaved((s) => ({ ...s, [c.url]: e instanceof Error ? e.message : 'Could not save.' }))
+                          }
+                        }}
+                      >
+                        {saved[c.url] === 'saved' ? 'Saved to library' : 'Save to library'}
+                      </button>
+                    )}
+                    {saved[c.url] && saved[c.url] !== 'saved' && (
+                      <p role="alert" className="text-earth">
+                        {saved[c.url]}
+                      </p>
+                    )}
                   </div>
                 </li>
               ))}

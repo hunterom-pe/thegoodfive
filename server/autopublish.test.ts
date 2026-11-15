@@ -375,3 +375,14 @@ describe('judging the verifier’s answer', () => {
     expect(judge({ claims: [{ claim: 'x', verdict: 'contradicted', evidence: 'A sentence that is not there at all, honestly.' }, supported('The council funded the programme.')] }, input).verdict).toBe('inconclusive')
   })
 })
+
+describe('photo coverage', () => {
+  it('warns, without blocking, when a published story would show artwork', async () => {
+    const stories = fiveGood().map((s, i) => ({ ...s, hasPublicPhoto: i !== 2 }))
+    const store = new MemoryStore(edition(stories))
+    const out = await go(store)
+    expect(out.status).toBe('published')
+    expect(out.record.details.warnings?.join(' ')).toMatch(/no approved photo/)
+    expect(out.record.details.warnings?.filter((w) => /no approved photo/.test(w))).toHaveLength(1)
+  })
+})

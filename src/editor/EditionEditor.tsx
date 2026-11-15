@@ -35,6 +35,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
   const lineup: Lineup = { primary: primary.map((s) => s.id), backup: backup.map((s) => s.id) }
   const published = edition.status === 'published'
   const issues = blockers(primary)
+  const missingPhotos = primary.filter((s) => !(s.imageUrl && s.imageRightsConfirmed))
 
   /** Run one change, then re-read the edition so the screen always shows what's stored. */
   async function act(change: () => Promise<void>) {
@@ -88,6 +89,12 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
         </p>
       )}
 
+      {missingPhotos.length > 0 && (
+        <p role="status" className="mt-5 border-l-2 border-earth bg-white py-2 pl-3 pr-2 text-[0.9375rem] text-earth">
+          {missingPhotos.length === 1 ? '1 of the five stories has' : `${missingPhotos.length} of the five stories have`} no approved photo, so readers will see geometric artwork ({missingPhotos.map((s) => s.position).join(', ')}). Open a story and choose a photo under “Photograph”. Photos you save to the library are used for future automatic editions.
+        </p>
+      )}
+
       <section className="mt-9">
         <h2 className="label flex items-center justify-between border-b border-forest pb-2 text-forest">
           <span>The five</span>
@@ -107,6 +114,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
               actions={{
                 onSave: save(story),
                 searchPhotos: editorRepo.searchPhotos,
+                saveToLibrary: editorRepo.saveToLibrary,
                 onMove: (direction) => setLineup(move(lineup, story.id, direction)),
                 onReject: (reason) => setLineup(reject(lineup, story.id), { id: story.id, reason }),
                 swap: {
@@ -138,6 +146,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
               actions={{
                 onSave: save(story),
                 searchPhotos: editorRepo.searchPhotos,
+                saveToLibrary: editorRepo.saveToLibrary,
                 onReject: (reason) => setLineup(reject(lineup, story.id), { id: story.id, reason }),
                 swap: {
                   label: 'Use in the edition…',

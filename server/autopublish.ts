@@ -16,6 +16,8 @@ export interface StoredStory {
   sourcePublishedAt: string | null
   sourceMaterial: string | null
   aiRationale: string | null
+  /** Will readers see an approved photo? Unknown (undefined) in older callers. */
+  hasPublicPhoto?: boolean
 }
 
 export interface StoredEdition {
@@ -201,6 +203,7 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
     }
     const { chosen, rejected } = selection
     const needsReview = chosen.filter((s) => verdicts.get(s.id)?.verdict !== 'verified').map((s) => ({ headline: s.headline, source: s.sourceName, verdict: verdicts.get(s.id)?.verdict ?? 'inconclusive', issues: verdicts.get(s.id)?.issues ?? ['Not checked.'] }))
+    for (const s of chosen) if (s.hasPublicPhoto === false) warnings.push(`${s.headline.slice(0, 40)}: no approved photo, so it will run with geometric artwork.`)
     const details = {
       accepted: chosen.map((s) => ({ headline: s.headline, source: s.sourceName })),
       rejected: rejected.map((r) => ({ headline: r.item.headline, source: r.item.sourceName, reasons: r.reasons })),

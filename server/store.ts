@@ -167,7 +167,7 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
     async loadEdition(date) {
       const { data, error } = await db
         .from('editions')
-        .select('id, edition_date, status, stories(id, role, position, headline, summary, category, source_name, source_url, source_published_at, source_material, ai_rationale)')
+        .select('id, edition_date, status, stories(id, role, position, headline, summary, category, source_name, source_url, source_published_at, source_material, ai_rationale, image_url, image_rights_confirmed, image_source, image_editor_approved)')
         .eq('edition_date', date)
         .maybeSingle()
       if (error) throw new Error(`Could not read the edition: ${error.message}`)
@@ -183,6 +183,7 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
           sourceName: (r.source_name as string) ?? '', sourceUrl: (r.source_url as string) ?? '',
           sourcePublishedAt: (r.source_published_at as string | null) ?? null, sourceMaterial: (r.source_material as string | null) ?? null,
           aiRationale: (r.ai_rationale as string | null) ?? null,
+          hasPublicPhoto: Boolean(r.image_url && r.image_rights_confirmed && (r.image_source !== 'unsplash' || r.image_editor_approved)),
         })),
       }
     },

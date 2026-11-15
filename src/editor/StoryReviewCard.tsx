@@ -25,6 +25,7 @@ export interface CardActions {
   onMove?: (direction: -1 | 1) => void
   onReject: (reason: string) => void
   searchPhotos?: (query: string) => Promise<import('../lib/types').ImageCandidate[]>
+  saveToLibrary?: (photo: import('../lib/types').ImageCandidate, category: string, keywords: string) => Promise<void>
   /** For one of the five: swap with a backup. For a backup: take a slot. */
   swap?: { label: string; options: { value: string; label: string }[]; onPick: (value: string) => void }
 }
@@ -100,6 +101,7 @@ export function StoryReviewCard({
                 {story.imageRightsConfirmed ? 'Photo approved' : 'Photo NOT approved'}
               </span>
             )}
+            {!story.imageUrl && <span className="bg-blush px-1.5 py-0.5 text-[0.5625rem] text-forest-deep">No photo: artwork</span>}
             {dirty && <span className="bg-blush px-1.5 py-0.5 text-[0.5625rem] text-forest-deep">Unsaved</span>}
           </span>
           <span className="display mt-1.5 block text-[1.25rem] !leading-[1.15]">{value.headline || 'Untitled'}</span>
@@ -204,7 +206,7 @@ export function StoryReviewCard({
         </fieldset>
         {/* The photo panel stays usable on a published edition: it changes only the image, never the words. */}
         <div className="p-4 pt-0 sm:p-5 sm:pt-0">
-          <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={applyImage} imageDirty={Object.keys(patch).some((k) => k.startsWith('image'))} onSaveManual={() => applyImage(Object.fromEntries(Object.entries(patch).filter(([k]) => k.startsWith('image'))) as StoryPatch)} searchPhotos={actions.searchPhotos} />
+          <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={applyImage} imageDirty={Object.keys(patch).some((k) => k.startsWith('image'))} onSaveManual={() => applyImage(Object.fromEntries(Object.entries(patch).filter(([k]) => k.startsWith('image'))) as StoryPatch)} searchPhotos={actions.searchPhotos} saveToLibrary={actions.saveToLibrary} />
         </div>
         </div>
       )}

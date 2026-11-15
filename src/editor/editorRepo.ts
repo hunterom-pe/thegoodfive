@@ -31,7 +31,9 @@ export interface AutomationSnapshot {
   lastPublished: { date: string; publishedAt: string; automatic: boolean } | null
   generation: { status: string; error: string | null; startedAt: string; trigger: string } | null
   publication: { status: string; reason: string | null; startedAt: string; trigger: string; accepted: number; rejected: { headline: string; reasons: string[] }[] } | null
-  today: { status: string; primary: number; backup: number; rejected: { headline: string; reason: string }[] } | null
+  today: { status: string; primary: number; backup: number; withoutPhoto: number; rejected: { headline: string; reason: string }[] } | null
+  /** Photos saved for scheduled editions to choose from. Null if the library can't be read (migration not run). */
+  libraryCount: number | null
 }
 
 export interface PublishCheckReport {
@@ -66,6 +68,8 @@ export interface EditorRepo {
   updateStoryImage(editionId: string, story: EditorStory, patch: StoryPatch): Promise<void>
   /** An editor's own search for licensed photos (Unsplash asks for human-driven use). */
   searchPhotos(query: string): Promise<ImageCandidate[]>
+  /** Save an Unsplash photo an editor chose to the library that scheduled editions pick from. */
+  saveToLibrary(photo: ImageCandidate, category: string, keywords: string): Promise<void>
   /** Tell the photo provider (Unsplash requires this) that an editor chose a photo. Best effort. */
   trackImageUse(storyId: string): Promise<void>
   /** Permanently remove a story that has already been rejected. */
@@ -125,7 +129,8 @@ const demoRepo: EditorRepo = {
       })(),
       generation: null,
       publication: null,
-      today: edition ? { status: edition.status, primary: edition.stories.filter((s) => s.role === 'primary').length, backup: edition.stories.filter((s) => s.role === 'backup').length, rejected: [] } : null,
+      today: edition ? { status: edition.status, primary: edition.stories.filter((s) => s.role === 'primary').length, backup: edition.stories.filter((s) => s.role === 'backup').length, withoutPhoto: edition.stories.filter((s) => s.role === 'primary' && !(s.imageUrl && s.imageRightsConfirmed)).length, rejected: [] } : null,
+      libraryCount: 0,
     }
   },
   async checkPublish() {
@@ -140,6 +145,9 @@ const demoRepo: EditorRepo = {
       { url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=72', alt: 'A sunlit path through tall woodland', kind: 'illustrative', source: 'unsplash', credit: 'Sample photographer', creditUrl: 'https://unsplash.com/', license: 'Unsplash License', sourceUrl: 'https://unsplash.com/' },
       { url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=72', alt: 'Mountains above a misty valley', kind: 'illustrative', source: 'unsplash', credit: 'Sample photographer', creditUrl: 'https://unsplash.com/', license: 'Unsplash License', sourceUrl: 'https://unsplash.com/' },
     ]
+  },
+  async saveToLibrary() {
+    throw new Error('The photo library needs Supabase. It isn’t available in demo mode.')
   },
   async generate() {
     throw new Error('Generating a draft needs Supabase and the Netlify functions. It isn’t available in demo mode.')
@@ -333,19 +341,21 @@ const supabaseRepo: EditorRepo = {
       supabase!.from('editions').select('edition_date, published_at, published_by').eq('status', 'published').order('edition_date', { ascending: false }).limit(1).maybeSingle(),
       supabase!.from('discovery_runs').select('status, error, started_at, trigger').eq('edition_date', today).order('started_at', { ascending: false }).limit(1).maybeSingle(),
       supabase!.from('publish_runs').select('status, reason, started_at, trigger, details').eq('edition_date', today).neq('status', 'dry_run').order('started_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase!.from('editions').select('status, stories(role, headline, rejected_reason)').eq('edition_date', today).maybeSingle(),
+      supabase!.from('editions').select('status, stories(role, headline, rejected_reason, image_url, image_rights_confirmed)').eq('edition_date', today).maybeSingle(),
       automationConfig(),
     ])
+    const lib = await supabase!.from('photo_library').select('id', { count: 'exact', head: true }).eq('active', true)
     // The publish log only exists once the Phase 5 migration has been run; until then show "hasn't run yet" instead of failing.
     for (const r of [last, gen, ed]) check(r.error)
-    const stories = ((ed.data?.stories ?? []) as { role: StoryRole; headline: string; rejected_reason: string | null }[])
+    const stories = ((ed.data?.stories ?? []) as { role: StoryRole; headline: string; rejected_reason: string | null; image_url: string | null; image_rights_confirmed: boolean }[])
     const details = (pub.data?.details ?? {}) as { accepted?: unknown[]; rejected?: { headline: string; reasons: string[] }[] }
     return {
       config,
       lastPublished: last.data ? { date: last.data.edition_date as string, publishedAt: last.data.published_at as string, automatic: last.data.published_by === null } : null,
       generation: gen.data ? { status: gen.data.status as string, error: (gen.data.error as string | null) ?? null, startedAt: gen.data.started_at as string, trigger: gen.data.trigger as string } : null,
       publication: pub.data && !pub.error ? { status: pub.data.status as string, reason: (pub.data.reason as string | null) ?? null, startedAt: pub.data.started_at as string, trigger: pub.data.trigger as string, accepted: details.accepted?.length ?? 0, rejected: details.rejected ?? [] } : null,
-      today: ed.data ? { status: ed.data.status as string, primary: stories.filter((s) => s.role === 'primary').length, backup: stories.filter((s) => s.role === 'backup').length, rejected: stories.filter((s) => s.role === 'rejected').map((s) => ({ headline: s.headline, reason: s.rejected_reason ?? '' })) } : null,
+      today: ed.data ? { status: ed.data.status as string, primary: stories.filter((s) => s.role === 'primary').length, backup: stories.filter((s) => s.role === 'backup').length, withoutPhoto: stories.filter((s) => s.role === 'primary' && !(s.image_url && s.image_rights_confirmed)).length, rejected: stories.filter((s) => s.role === 'rejected').map((s) => ({ headline: s.headline, reason: s.rejected_reason ?? '' })) } : null,
+      libraryCount: lib.error ? null : (lib.count ?? 0),
     }
   },
   async checkPublish() {
@@ -360,6 +370,18 @@ const supabaseRepo: EditorRepo = {
     if (!body) throw new Error('Publish checks run as a Netlify function, so they only work on the deployed site or under `netlify dev`.')
     if (!res.ok) throw new Error(body.message ?? `The check failed (${res.status}).`)
     return { status: body.status ?? 'failed', reason: body.reason ?? '', details: body.details ?? {} }
+  },
+  async saveToLibrary(photo, category, keywords) {
+    const id = photo.url.match(/photo-([\w-]+)/)?.[1] ?? photo.sourceUrl?.split('/').pop()?.split('?')[0]
+    if (!id || photo.source !== 'unsplash' || !photo.creditUrl || !photo.sourceUrl || !photo.credit) throw new Error('Only a photo found through the Unsplash search can be saved to the library.')
+    const words = [...new Set(keywords.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 3))]
+    const { data: session } = await supabase!.auth.getSession()
+    const strip = (u: string) => { const x = new URL(u); x.searchParams.delete('utm_source'); x.searchParams.delete('utm_medium'); return x.toString() }
+    const { error } = await supabase!.from('photo_library').upsert(
+      { unsplash_id: id, url: photo.url, alt: photo.alt ?? 'Illustrative photo', credit: photo.credit, credit_url: strip(photo.creditUrl), source_url: strip(photo.sourceUrl), download_location: (photo as { downloadLocation?: string | null }).downloadLocation ?? null, categories: [category], keywords: words, added_by: session.session?.user.id ?? null },
+      { onConflict: 'unsplash_id' },
+    )
+    if (error) throw new Error(error.message.includes('photo_library') ? 'The photo library isn’t set up yet. Run the newest migration in Supabase.' : error.message)
   },
   async trackImageUse(storyId) {
     try {
