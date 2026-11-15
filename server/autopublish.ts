@@ -30,14 +30,31 @@ export interface StoredEdition {
 
 export type PublishDecision = 'published' | 'already_published' | 'held' | 'changed'
 
+/** The fingerprint version this code sends. The database accepts versions it knows (see migration 20261118000000). */
+export const FINGERPRINT_VERSION = 2
+
 /**
- * A fingerprint of everything the checks read about a story. The database computes the same value
- * (public.story_content_hash) and refuses to publish a story whose fingerprint differs from the one that was
- * checked, so an edit made between checking and publishing can never go out unchecked. md5 detects change; it is not for secrecy.
+ * A timestamp as whole seconds since 1970, so "…T14:00:22Z", "…T14:00:22+00:00" and "…T14:00:22.000+00:00"
+ * all agree with the database's extract(epoch …). Missing is ''. Unreadable is a marker that can never match.
  */
-export function contentHash(s: Pick<StoredStory, 'headline' | 'summary' | 'category' | 'sourceName' | 'sourceUrl' | 'sourceMaterial'>): string {
+export function epochSeconds(value: string | null | undefined): string {
+  if (!value) return ''
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? `unreadable:${value}` : String(Math.floor(ms / 1000))
+}
+
+/**
+ * A fingerprint of EVERY input the checks use to decide a story may run: its words, category, source name and
+ * link, the source text, the source's publication time (freshness) and the positive assessment. The database
+ * computes the same value (public.story_content_hash_v2) and refuses to publish a story whose fingerprint differs
+ * from the one checked, so an edit between checking and publishing (including one that makes a source too old)
+ * can never go out unchecked. md5 detects change; it is not used for secrecy.
+ */
+export function contentHash(s: Pick<StoredStory, 'headline' | 'summary' | 'category' | 'sourceName' | 'sourceUrl' | 'sourceMaterial' | 'sourcePublishedAt' | 'aiRationale'>): string {
   const md5 = (t: string) => createHash('md5').update(t, 'utf8').digest('hex')
-  return md5([s.headline ?? '', s.summary ?? '', s.category ?? '', s.sourceName ?? '', s.sourceUrl ?? '', md5(s.sourceMaterial ?? '')].join('\x1f'))
+  return md5(
+    [s.headline ?? '', s.summary ?? '', s.category ?? '', s.sourceName ?? '', s.sourceUrl ?? '', md5(s.sourceMaterial ?? ''), epochSeconds(s.sourcePublishedAt), md5(s.aiRationale ?? '')].join('\x1f'),
+  )
 }
 
 /** Everything the publisher needs from storage. The real one talks to Supabase; tests use memory. */
@@ -46,7 +63,7 @@ export interface PublishStore {
   /** normalized or raw URLs of articles in editions published in the last 30 days (before `date`). */
   recentSourceUrls(date: string): Promise<string[]>
   /** The restricted, service-role-only database function. Throws if the database refuses. */
-  publish(editionId: string, date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string }[]): Promise<PublishDecision>
+  publish(editionId: string, date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string; v: number }[]): Promise<PublishDecision>
   record(run: PublishRunRecord): Promise<void>
 }
 
@@ -246,7 +263,7 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
     }
     if (o.dryRun || o.trigger === 'check') return record('dry_run', 'All five stories pass. Automatic publishing would go ahead.', details)
 
-    const decision = await o.store.publish(edition.id, o.date, chosen.map((s) => s.id), rejected.map((r) => ({ id: r.item.id, reason: r.reasons.join(' ').slice(0, 900) })), chosen.map((s) => ({ id: s.id, hash: checkedHash.get(s.id)! })))
+    const decision = await o.store.publish(edition.id, o.date, chosen.map((s) => s.id), rejected.map((r) => ({ id: r.item.id, reason: r.reasons.join(' ').slice(0, 900) })), chosen.map((s) => ({ id: s.id, hash: checkedHash.get(s.id)!, v: FINGERPRINT_VERSION })))
     if (decision === 'changed') {
       const why = 'A story was edited after it was checked, so nothing was published. The next run checks the new text.'
       await alert(why)

@@ -420,9 +420,13 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     seedPublished(YESTERDAY)
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
-    const rows = pg.query(`select s.id, s.headline, s.summary, s.category::text as category, s.source_name, s.source_url, s.source_material, public.story_content_hash(s) as db_hash from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}'`) as { headline: string; summary: string; category: string; source_name: string; source_url: string; source_material: string | null; db_hash: string }[]
+    const rows = pg.query(`select s.id, s.headline, s.summary, s.category::text as category, s.source_name, s.source_url, s.source_material, s.source_published_at, s.ai_rationale, public.story_content_hash_v2(s) as db_hash from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}'`) as { headline: string; summary: string; category: string; source_name: string; source_url: string; source_material: string | null; source_published_at: string | null; ai_rationale: string | null; db_hash: string }[]
     expect(rows.length).toBeGreaterThanOrEqual(5)
-    for (const r of rows) expect(contentHash({ headline: r.headline, summary: r.summary, category: r.category, sourceName: r.source_name, sourceUrl: r.source_url, sourceMaterial: r.source_material })).toBe(r.db_hash)
+    for (const r of rows) expect(contentHash({ headline: r.headline, summary: r.summary, category: r.category, sourceName: r.source_name, sourceUrl: r.source_url, sourceMaterial: r.source_material, sourcePublishedAt: r.source_published_at, aiRationale: r.ai_rationale })).toBe(r.db_hash)
+    // Timestamps with fractional seconds and offsets agree too.
+    pg.exec(`update public.stories set source_published_at = '2026-11-13 21:00:00.123456-07' where id = (select s.id from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' limit 1)`)
+    const r = pg.query(`select s.headline, s.summary, s.category::text as category, s.source_name, s.source_url, s.source_material, s.source_published_at, s.ai_rationale, public.story_content_hash_v2(s) as db_hash from public.stories s where source_published_at = '2026-11-13 21:00:00.123456-07'`)[0] as (typeof rows)[number]
+    expect(contentHash({ headline: r.headline, summary: r.summary, category: r.category, sourceName: r.source_name, sourceUrl: r.source_url, sourceMaterial: r.source_material, sourcePublishedAt: r.source_published_at, aiRationale: r.ai_rationale })).toBe(r.db_hash)
   })
 
   it('a story edited while the claim check is running is not published, and the edition stays a draft', async () => {
@@ -448,20 +452,40 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     else expect(todayRow()?.status).toBe('draft')
   })
 
+  it('moving a source date while the claim check runs stops publication', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    let edited = false
+    world.onClaimCheck = () => {
+      if (edited) return
+      edited = true // still within the database's 7-day rule, but past the 5-day freshness check
+      pg.exec(`update public.stories set source_published_at = now() - interval '6 days' where id = (select s.id from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.role = 'primary' and s.position = 2)`)
+    }
+    const out = await scheduledPublish('schedule', { db })
+    world.onClaimCheck = undefined
+    expect(out?.status).toBe('skipped')
+    expect(out?.reason).toMatch(/edited after it was checked/)
+    expect(todayRow()?.status).toBe('draft')
+  })
+
   it('the publish function itself refuses stale or missing fingerprints, whatever the caller says', async () => {
     seedPublished(YESTERDAY)
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
     const ed = pg.query(`select id from public.editions where edition_date = '${TODAY}'`)[0] as { id: string }
-    const five = pg.query(`select s.id, public.story_content_hash(s) as hash from public.stories s where s.edition_id = '${ed.id}' and s.role = 'primary' order by s.position`) as { id: string; hash: string }[]
+    const five = pg.query(`select s.id, public.story_content_hash_v2(s) as hash, public.story_content_hash(s) as hash_v1 from public.stories s where s.edition_id = '${ed.id}' and s.role = 'primary' order by s.position`) as { id: string; hash: string; hash_v1: string }[]
     const call = (checked: unknown) => db.rpc('auto_publish_edition', { p_edition: ed.id, p_date: TODAY, p_primary: five.map((f) => f.id), p_rejections: [], p_checked: checked })
-    const stale = await call(five.map((f, i) => ({ id: f.id, hash: i === 1 ? 'deadbeef' : f.hash })))
+    const stale = await call(five.map((f, i) => ({ id: f.id, hash: i === 1 ? 'deadbeef' : f.hash, v: 2 })))
     expect(stale).toMatchObject({ data: 'changed', error: null })
     expect((await call(five.slice(0, 4))).error?.message).toMatch(/checked content of all five/)
     expect((await call(five.map((f) => ({ id: f.id, hash: null })))).data).toBe('changed')
     expect(todayRow()?.status).toBe('draft') // nothing moved
     expect(publicDates()).toEqual([YESTERDAY])
-    const good = await call(five)
+    expect((await call(five.map((f) => ({ id: f.id, hash: f.hash, v: 3 })))).data).toBe('changed') // an unknown version never matches
+    expect((await call(five.map((f) => ({ id: f.id, hash: f.hash_v1, v: 2 })))).data).toBe('changed') // a v1 value claimed as v2
+    // Version 1 is still accepted during the changeover, so the database can be updated before or after the code.
+    const good = await call(five.map((f) => ({ id: f.id, hash: f.hash_v1 })))
     expect(good).toMatchObject({ data: 'published', error: null })
   })
 

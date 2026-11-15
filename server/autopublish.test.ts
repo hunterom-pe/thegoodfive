@@ -1,15 +1,16 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { SCHEDULE } from '../src/lib/schedule'
-import { contentHash, runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
+import { contentHash, epochSeconds, runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
 import { backup, DATE, edition, fiveGood, NOW, story } from './fixtures'
 import { trackedNotifier, webhookNotifier } from './alerts'
 import { judge, statementsOf, type ClaimVerifier } from './pipeline/verify'
+import { evaluateStory } from './pipeline/gates'
 
 /** An in-memory stand-in for the database that obeys the same rules as auto_publish_edition(). */
 class MemoryStore implements PublishStore {
   published: { editionId: string; primary: string[]; rejections: { id: string; reason: string }[] }[] = []
-  lastChecked: { id: string; hash: string }[] = []
+  lastChecked: { id: string; hash: string; v: number }[] = []
   runs: PublishRunRecord[] = []
   recent: string[] = []
   private lock: Promise<void> = Promise.resolve()
@@ -22,7 +23,7 @@ class MemoryStore implements PublishStore {
     if (this.failWith?.op === 'recent') throw new Error(this.failWith.message)
     return this.recent
   }
-  async publish(editionId: string, _date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string }[]): Promise<PublishDecision> {
+  async publish(editionId: string, _date: string, primary: string[], rejections: { id: string; reason: string }[], checked: { id: string; hash: string; v: number }[]): Promise<PublishDecision> {
     if (this.failWith?.op === 'publish') throw new Error(this.failWith.message)
     this.lastChecked = checked
     const run = this.lock.then(async () => {
@@ -344,6 +345,31 @@ describe('failures during publication are visible, and never stop cleanup', () =
 })
 
 describe('content edited after it was checked', () => {
+  it('the audit case: moving the source date so the story is too old changes the fingerprint, and the gate rejects it', () => {
+    const s = story(0)
+    const stale = { ...s, sourcePublishedAt: new Date(NOW.getTime() - 6 * 86_400_000).toISOString() }
+    expect(contentHash(stale)).not.toBe(contentHash(s))
+    expect(evaluateStory({ ...stale }, { now: NOW, recentUrls: new Set() }).failures.map((f) => f.code)).toContain('stale')
+  })
+  it('the same moment written differently fingerprints the same, as it does in the database', () => {
+    const s = story(0)
+    for (const same of ['2026-11-14T04:00:00Z', '2026-11-14T04:00:00+00:00', '2026-11-14T04:00:00.000+00:00', '2026-11-13T21:00:00-07:00', '2026-11-14T04:00:00.999999+00:00'])
+      expect(contentHash({ ...s, sourcePublishedAt: same }), same).toBe(contentHash({ ...s, sourcePublishedAt: '2026-11-14T04:00:00Z' }))
+    expect(epochSeconds('2026-11-14T04:00:00Z')).toBe('1794628800')
+    expect(epochSeconds(null)).toBe('')
+    expect(epochSeconds('not a date')).toMatch(/^unreadable:/)
+  })
+  it('refuses to publish when the source date is moved during the claim check', async () => {
+    const store = new MemoryStore(edition(fiveGood()))
+    const verify: ClaimVerifier = async () => {
+      store.ed!.stories[1].sourcePublishedAt = new Date(NOW.getTime() - 6 * 86_400_000).toISOString()
+      return { verdict: 'verified', issues: [] }
+    }
+    const out = await go(store, { verify })
+    expect(out.status).toBe('skipped')
+    expect(store.published).toHaveLength(0)
+  })
+
   it('refuses to publish when a chosen story is edited while the claim check is running', async () => {
     const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
     const notify = vi.fn(async () => {})
@@ -363,12 +389,12 @@ describe('content edited after it was checked', () => {
     const out = await go(store)
     expect(out.status).toBe('published')
     expect(store.lastChecked).toHaveLength(5)
-    expect(store.lastChecked[0]).toEqual({ id: 's0', hash: contentHash(store.ed!.stories[0]) })
+    expect(store.lastChecked[0]).toEqual({ id: 's0', hash: contentHash(store.ed!.stories[0]), v: 2 })
   })
   it('the fingerprint changes with any checked field and ignores the rest', () => {
     const base = story(0)
     const h = contentHash(base)
-    for (const change of [{ headline: base.headline + '!' }, { summary: base.summary + ' x' }, { category: 'health' }, { sourceName: 'Other' }, { sourceUrl: base.sourceUrl + '/b' }, { sourceMaterial: (base.sourceMaterial ?? '') + ' more' }]) {
+    for (const change of [{ headline: base.headline + '!' }, { summary: base.summary + ' x' }, { category: 'health' }, { sourceName: 'Other' }, { sourceUrl: base.sourceUrl + '/b' }, { sourceMaterial: (base.sourceMaterial ?? '') + ' more' }, { sourcePublishedAt: '2026-11-01T00:00:00Z' }, { sourcePublishedAt: null }, { aiRationale: 'Different assessment.' }]) {
       expect(contentHash({ ...base, ...change }), JSON.stringify(Object.keys(change))).not.toBe(h)
     }
     expect(contentHash({ ...base, role: 'backup' } as typeof base)).toBe(h)
