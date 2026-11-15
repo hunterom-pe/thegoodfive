@@ -1,13 +1,17 @@
 import { normalizeUrl, titleSimilarity } from './dedupe.ts'
 import { hostOf, isTrusted, TRUSTED_DOMAINS } from './sources.ts'
 import { ungroundedNumbers, ungroundedQuotes, wordCount } from './curate.ts'
+import { checkClaims } from './claims.ts'
 
 /**
  * Deterministic publication gates.
  *
  * Nothing here asks an AI whether a story is accurate. Each check compares the
- * words on the page with the source text retrieved from the publisher, or tests
- * a plain structural rule. A story that cannot be supported is REJECTED, never
+ * words and details on the page with the source text retrieved from the publisher, or tests
+ * a plain structural rule. These checks catch common errors (invented figures, wrong units,
+ * negated or reversed claims, conclusions the source never draws). They do NOT verify every
+ * claim: summary sentences they cannot match to the source are listed in `unaligned`, and
+ * the publisher requires a separate claim verification (verify.ts) before publishing. A story that cannot be supported is REJECTED, never
  * "scored": there is no confidence number to argue with. The same function runs
  * when a draft is generated and again just before publishing, so a manual edit
  * is re-checked rather than trusted.
@@ -16,7 +20,7 @@ export type FailureCode =
   | 'no_headline' | 'no_summary' | 'no_source_name' | 'url_invalid' | 'source_not_trusted' | 'source_unreachable'
   | 'undated' | 'stale' | 'future_dated' | 'insufficient_evidence' | 'numbers_unsupported' | 'quote_unsupported'
   | 'entities_unsupported' | 'weakly_grounded' | 'headline_hype' | 'headline_form' | 'summary_length'
-  | 'preliminary_unqualified' | 'not_positive' | 'sensitive_content' | 'recent_duplicate' | 'near_duplicate' | 'no_positive_assessment'
+  | 'claim_contradiction' | 'conclusion_unsupported' | 'preliminary_unqualified' | 'not_positive' | 'sensitive_content' | 'recent_duplicate' | 'near_duplicate' | 'no_positive_assessment'
 
 export interface Failure {
   code: FailureCode
@@ -51,6 +55,8 @@ export interface GateResult {
   failures: Failure[]
   /** Things worth a person's glance that do not block publication. */
   warnings: string[]
+  /** Summary sentences the deterministic checks could not tie to any sentence of the source. */
+  unaligned?: string[]
 }
 
 // ── Tunable thresholds, in one place ────────────────────────────────────
@@ -137,6 +143,7 @@ const SENSITIVE =
 export function evaluateStory(s: GateStory, ctx: GateContext): GateResult {
   const failures: Failure[] = []
   const warnings: string[] = []
+  let unaligned: string[] = []
   const fail = (code: FailureCode, message: string) => failures.push({ code, message })
 
   const headline = s.headline.trim()
@@ -226,12 +233,17 @@ export function evaluateStory(s: GateStory, ctx: GateContext): GateResult {
     const ratio = groundingRatio(summary, material)
     if (ratio < LIMITS.minGrounding) fail('weakly_grounded', `Only ${Math.round(ratio * 100)}% of the summary's wording is traceable to the source (need ${Math.round(LIMITS.minGrounding * 100)}%).`)
 
+    // Meaning, not just vocabulary: negation, opposites, reversed roles, units, unsupported conclusions.
+    const claims = checkClaims(headline, summary, material)
+    for (const f of claims.findings) fail(f.kind === 'unsupported_conclusion' ? 'conclusion_unsupported' : 'claim_contradiction', f.message)
+    unaligned = claims.unaligned
+
     // Early-stage science and health must say so; and never be sold as a cure.
     if (['health', 'science'].includes(s.category) && PRELIMINARY_IN_SOURCE.test(material) && !HEDGE_IN_SUMMARY.test(summary))
       fail('preliminary_unqualified', 'The source describes preliminary or early-stage work, but the summary states it without qualification.')
   }
 
-  return { ok: failures.length === 0, failures, warnings }
+  return { ok: failures.length === 0, failures, warnings, unaligned }
 }
 
 // ── Choosing the five ───────────────────────────────────────────────────

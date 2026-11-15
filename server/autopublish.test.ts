@@ -4,6 +4,7 @@ import { SCHEDULE } from '../src/lib/schedule'
 import { runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
 import { backup, DATE, edition, fiveGood, NOW, story } from './fixtures'
 import { webhookNotifier } from './alerts'
+import { judge, type ClaimVerifier } from './pipeline/verify'
 
 /** An in-memory stand-in for the database that obeys the same rules as auto_publish_edition(). */
 class MemoryStore implements PublishStore {
@@ -42,8 +43,9 @@ class MemoryStore implements PublishStore {
 }
 
 const ok: SourceChecker = async () => ({ ok: true })
+const confirms: ClaimVerifier = async () => ({ verdict: 'verified', issues: [] })
 const go = (store: MemoryStore, over: Partial<Parameters<typeof runAutoPublish>[0]> = {}) =>
-  runAutoPublish({ store, date: DATE, trigger: 'schedule', enabled: true, now: NOW, checkSource: ok, ...over })
+  runAutoPublish({ store, date: DATE, trigger: 'schedule', enabled: true, now: NOW, checkSource: ok, verify: confirms, ...over })
 
 describe('automatic publication', () => {
   it('publishes five valid stories, in order, and records it', async () => {
@@ -298,5 +300,78 @@ describe('schedule consistency', () => {
       .map((f) => ({ file: f, cron: /schedule: '([^']+)'/.exec(readFileSync(new URL(f, dir), 'utf8'))?.[1] }))
     expect(crons).toHaveLength(SCHEDULE.length)
     for (const job of SCHEDULE) expect(crons.map((c) => c.cron)).toContain(job.utcCron)
+  })
+})
+
+
+describe('claim verification before publishing', () => {
+  const claim = (verdicts: Record<string, 'verified' | 'contradicted' | 'inconclusive'>): ClaimVerifier => async ({ headline }) => {
+    const v = verdicts[headline] ?? 'verified'
+    return { verdict: v, issues: v === 'verified' ? [] : [`${v}: ${headline}`] }
+  }
+  it('publishes only after every story is confirmed', async () => {
+    const verify = vi.fn(confirms)
+    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    expect((await go(store, { verify })).status).toBe('published')
+    expect(verify).toHaveBeenCalledTimes(5) // the spare is never read
+  })
+  it('turns away a story whose claims conflict with its source and uses the next backup', async () => {
+    const bad = story(1)
+    const store = new MemoryStore(edition([story(0), bad, story(2), story(3), story(4), backup(5), backup(6)]))
+    const out = await go(store, { verify: claim({ [bad.headline]: 'contradicted' }) })
+    expect(out.status).toBe('published')
+    expect(store.published[0].primary).not.toContain('s1')
+    expect(store.published[0].primary).toContain('b5')
+    expect(out.record.details.rejected?.some((r) => r.reasons.join(' ').includes('Claim check'))).toBe(true)
+  })
+  it('holds the whole edition when a story cannot be confirmed, instead of publishing it', async () => {
+    const unsure = story(2)
+    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    const out = await go(store, { verify: claim({ [unsure.headline]: 'inconclusive' }) })
+    expect(out.status).toBe('failed')
+    expect(out.reason).toMatch(/Held for an editor/)
+    expect(store.published).toHaveLength(0)
+    expect(out.record.details.needsReview?.[0].verdict).toBe('inconclusive')
+  })
+  it('holds the edition when no verifier is configured', async () => {
+    const store = new MemoryStore(edition(fiveGood()))
+    const out = await go(store, { verify: undefined })
+    expect(out.status).toBe('failed')
+    expect(store.published).toHaveLength(0)
+  })
+  it('holds the edition when the claim check times out', async () => {
+    const slow: ClaimVerifier = () => new Promise(() => {})
+    const store = new MemoryStore(edition(fiveGood()))
+    const out = await go(store, { verify: slow, verifyBudgetMs: 20 })
+    expect(out.status).toBe('failed')
+    expect(out.record.details.needsReview?.[0].issues.join(' ')).toMatch(/timed out/)
+    expect(store.published).toHaveLength(0)
+  })
+  it('a dry run reports the same holds without recording anything', async () => {
+    const store = new MemoryStore(edition(fiveGood()))
+    const out = await go(store, { verify: undefined, dryRun: true })
+    expect(out.status).toBe('failed')
+    expect(store.runs).toHaveLength(0)
+  })
+})
+
+describe('judging the verifier’s answer', () => {
+  const material = 'Rangers on the Calder coast counted 1,140 turtle nests this season, the most since records began in 1996. The council funded the programme.'
+  const input = { headline: 'Rangers count turtle nests', summary: 'Rangers counted 1,140 turtle nests. The council funded the programme.', material }
+  const supported = (evidence: string) => ({ claim: 'c', verdict: 'supported' as const, evidence })
+  it('verifies when every claim is backed by a sentence that really is in the source', () => {
+    expect(judge({ claims: [supported('Rangers on the Calder coast counted 1,140 turtle nests this season, the most since records began in 1996.'), supported('The council funded the programme.')] }, input).verdict).toBe('verified')
+  })
+  it('does not trust evidence that is not in the source', () => {
+    expect(judge({ claims: [supported('Rangers on the Calder coast did not count turtle nests.'), supported('The council funded the programme.')] }, input).verdict).toBe('inconclusive')
+  })
+  it('is inconclusive when it skips sentences, says nothing, or finds claims the source lacks', () => {
+    expect(judge({ claims: [supported('The council funded the programme.')] }, input).verdict).toBe('inconclusive')
+    expect(judge({ claims: [] }, input).verdict).toBe('inconclusive')
+    expect(judge({ claims: [{ claim: 'x', verdict: 'not_in_source', evidence: '' }, supported('The council funded the programme.')] }, input).verdict).toBe('inconclusive')
+  })
+  it('calls a conflict only when the cited sentence is real', () => {
+    expect(judge({ claims: [{ claim: 'x', verdict: 'contradicted', evidence: 'The council funded the programme.' }, supported('The council funded the programme.')] }, input).verdict).toBe('contradicted')
+    expect(judge({ claims: [{ claim: 'x', verdict: 'contradicted', evidence: 'A sentence that is not there at all, honestly.' }, supported('The council funded the programme.')] }, input).verdict).toBe('inconclusive')
   })
 })

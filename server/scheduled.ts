@@ -2,7 +2,7 @@ import { makeSourceChecker, runAutoPublish, type AutoPublishOutcome } from './au
 import { webhookNotifier } from './alerts.ts'
 import { trustedDomains } from './pipeline/sources.ts'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { admin, editionToday, env, missingConfig, startRun, supabasePublishStore, triggerBackground } from './store.ts'
+import { admin, claimVerifier, editionToday, env, missingConfig, startRun, supabasePublishStore, triggerBackground } from './store.ts'
 
 /** 4:00 AM (and the 5:00 AM retry): prepare the day's draft. Costs nothing if a draft already exists. */
 export async function scheduledDraft(trigger: 'schedule' | 'retry', deps: { db?: SupabaseClient } = {}): Promise<void> {
@@ -43,6 +43,7 @@ export async function scheduledPublish(trigger: 'schedule' | 'retry', deps: { db
     enabled: c.autoPublish,
     extraTrustedDomains: c.extraTrusted,
     checkSource: makeSourceChecker(trustedDomains(c.extraTrusted)),
+    verify: claimVerifier(),
     notify: webhookNotifier(c.alertWebhook),
     log: console.log,
   })

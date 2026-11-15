@@ -2,6 +2,7 @@ import { normalizeUrl } from './pipeline/dedupe.ts'
 import { describe, evaluateStory, selectFive, type Candidate, type Failure, type GateContext, type GateStory } from './pipeline/gates.ts'
 import { hostOf, isTrusted, trustedDomains } from './pipeline/sources.ts'
 import type { Notify } from './alerts.ts'
+import type { ClaimVerifier, Verification } from './pipeline/verify.ts'
 
 export interface StoredStory {
   id: string
@@ -47,6 +48,8 @@ export interface PublishRunRecord {
     accepted?: { headline: string; source: string }[]
     rejected?: { headline: string; source: string; reasons: string[] }[]
     warnings?: string[]
+    /** Stories the claim check could not confirm, or found conflicting. */
+    needsReview?: { headline: string; source: string; verdict: string; issues: string[] }[]
   }
 }
 
@@ -70,6 +73,13 @@ export interface AutoPublishOptions {
   dryRun?: boolean
   now?: Date
   checkSource?: SourceChecker
+  /**
+   * Reads each summary claim by claim against its source. Without one, or if it fails or cannot confirm a
+   * story, nothing is published automatically: the edition is held for an editor.
+   */
+  verify?: ClaimVerifier
+  /** Longest to wait for all claim checks (the scheduled function has about 30 seconds in all). Default 20s. */
+  verifyBudgetMs?: number
   extraTrustedDomains?: string
   notify?: Notify
   log?: (line: string) => void
@@ -164,20 +174,48 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
           if (check.warning) warnings.push(`${item.headline.slice(0, 40)}: ${check.warning}`)
         }
         warnings.push(...result.warnings.map((w) => `${item.headline.slice(0, 40)}: ${w}`))
-        return { item, headline: item.headline, sourceUrl: item.sourceUrl, result: { ok: failures.length === 0, failures, warnings: result.warnings } }
+        return { item, headline: item.headline, sourceUrl: item.sourceUrl, result: { ok: failures.length === 0, failures, warnings: result.warnings, unaligned: result.unaligned } }
       }),
     )
 
-    const { chosen, rejected } = selectFive(candidates, 5)
+    // Choose five, then have each one's claims read against its source. A story whose claims conflict with
+    // its source is turned away and the next candidate steps in; one that cannot be confirmed holds the edition.
+    const verdicts = new Map<string, Verification>()
+    let selection = selectFive(candidates, 5)
+    for (let round = 0; round < 3 && selection.chosen.length === 5; round++) {
+      const pending = selection.chosen.filter((s) => !verdicts.has(s.id))
+      if (pending.length === 0) break
+      const budget = o.verifyBudgetMs ?? 20_000
+      const checked = await Promise.race([
+        Promise.all(pending.map(async (s) => [s.id, o.verify ? await o.verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }) : ({ verdict: 'inconclusive', issues: ['No claim verification is configured, so this story cannot be confirmed automatically.'] } as Verification)] as const)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
+      ])
+      for (const s of pending) verdicts.set(s.id, checked ? checked.find(([id]) => id === s.id)![1] : { verdict: 'inconclusive', issues: ['The claim check timed out.'] })
+      const conflicting = pending.filter((s) => verdicts.get(s.id)!.verdict === 'contradicted')
+      if (conflicting.length === 0) break
+      for (const s of conflicting) {
+        const c = candidates.find((x) => x.item.id === s.id)!
+        c.result = { ...c.result, ok: false, failures: [...c.result.failures, { code: 'claim_contradiction', message: `Claim check: ${verdicts.get(s.id)!.issues.join(' ')}`.slice(0, 600) }] }
+      }
+      selection = selectFive(candidates, 5)
+    }
+    const { chosen, rejected } = selection
+    const needsReview = chosen.filter((s) => verdicts.get(s.id)?.verdict !== 'verified').map((s) => ({ headline: s.headline, source: s.sourceName, verdict: verdicts.get(s.id)?.verdict ?? 'inconclusive', issues: verdicts.get(s.id)?.issues ?? ['Not checked.'] }))
     const details = {
       accepted: chosen.map((s) => ({ headline: s.headline, source: s.sourceName })),
       rejected: rejected.map((r) => ({ headline: r.item.headline, source: r.item.sourceName, reasons: r.reasons })),
       warnings,
+      ...(needsReview.length ? { needsReview } : {}),
     }
 
     if (chosen.length < 5) {
       const why = `Only ${chosen.length} of 5 stories passed verification, so nothing was published. The latest published edition stays on the site.`
       await alert(`${why} ${rejected.slice(0, 3).map((r) => `"${r.item.headline.slice(0, 40)}": ${r.reasons[0]}`).join(' | ')}`)
+      return record('failed', why, details)
+    }
+    if (needsReview.length) {
+      const why = `Held for an editor: the claim check could not confirm ${needsReview.length} of the 5 stories (${needsReview.map((n) => `"${n.headline.slice(0, 40)}"`).join(', ')}), so nothing was published. The latest published edition stays on the site.`
+      await alert(why)
       return record('failed', why, details)
     }
     if (o.dryRun || o.trigger === 'check') return record('dry_run', 'All five stories pass. Automatic publishing would go ahead.', details)

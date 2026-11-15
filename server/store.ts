@@ -3,6 +3,7 @@ import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
 import { webhookNotifier } from './alerts.ts'
 import { aiConfig } from './pipeline/gemini.ts'
+import { aiClaimVerifier, type ClaimVerifier } from './pipeline/verify.ts'
 
 /** Server-side configuration. None of these are ever sent to a browser. */
 export function env() {
@@ -203,4 +204,15 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
       if (error) throw new Error(error.message)
     },
   }
+}
+
+/**
+ * The claim verifier for automatic publishing. Fast and unforgiving: one short attempt per story
+ * (a scheduled function has about 30 seconds), and any failure means "could not confirm", which holds
+ * the edition for an editor. Undefined when no AI key is configured, which also holds it.
+ */
+export function claimVerifier(): ClaimVerifier | undefined {
+  const c = env()
+  if (!c.aiKey) return undefined
+  return aiClaimVerifier(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 18, retryDelaysMs: [1_000] }))
 }

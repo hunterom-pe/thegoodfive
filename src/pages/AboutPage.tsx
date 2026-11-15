@@ -63,10 +63,13 @@ export function AboutPage() {
             Every morning, software searches a global news index and a list of credible outlets. It sets aside duplicates, and an AI model picks stories that look genuinely positive, significant, recent and well sourced. It then writes a short summary of each, using only what the original report says.
           </p>
           <p>
-            Automated checks come next: the source must be real and recent, and every name, number and claim in a summary has to be traceable to the article it cites. If everything passes, the edition publishes by itself. If anything fails, the edition is held back and nothing goes out that day, rather than something we can’t stand behind.
+            Then come the checks. Software confirms the source is real, trusted and recent, and that every figure, name and quotation in a summary appears in the article. It looks for the usual slips: a number with the wrong unit, a claim turned into its opposite, two people swapped, or a cause the article never gives. A second AI reading then goes through each claim and has to point to the exact sentence that supports it.
           </p>
           <p>
-            Those checks are good, not perfect. They show a summary matches its source, not that the source is right, and AI can still make mistakes. An editor can review, change or pull any edition at any time, and when we get something wrong we correct it and say so.
+            If a story’s claims conflict with its source, it is dropped and another steps in. If a story can’t be confirmed, or the checks can’t run, the whole edition is held for an editor instead of being published. If everything passes, it publishes by itself.
+          </p>
+          <p>
+            None of this is a guarantee. The checks compare a summary with its source; they can’t tell whether the source itself is right, and AI can still make mistakes. An editor can review, change or pull any edition at any time, and when we get something wrong we correct it and say so.
           </p>
           <p>We’d rather run a modest story that’s true than an exciting one that isn’t. If a day’s best five are all about science, so be it; we don’t force a quota.</p>
         </Section>

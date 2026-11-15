@@ -1,7 +1,7 @@
 import { makeSourceChecker, runAutoPublish } from '../../server/autopublish.ts'
 import { trustedDomains } from '../../server/pipeline/sources.ts'
 import { checkGeminiKey, fingerprint, keyShape } from '../../server/pipeline/gemini.ts'
-import { admin, authenticateEditor, editionToday, env, supabasePublishStore } from '../../server/store.ts'
+import { admin, authenticateEditor, claimVerifier, editionToday, env, supabasePublishStore } from '../../server/store.ts'
 
 const json = (status: number, body: Record<string, unknown>) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
@@ -33,7 +33,7 @@ export default async (req: Request) => {
   if (action === 'check') {
     const outcome = await runAutoPublish({
       store: supabasePublishStore(db), date: editionToday(), trigger: 'check', enabled: c.autoPublish, dryRun: true,
-      extraTrustedDomains: c.extraTrusted, checkSource: makeSourceChecker(trustedDomains(c.extraTrusted)),
+      extraTrustedDomains: c.extraTrusted, checkSource: makeSourceChecker(trustedDomains(c.extraTrusted)), verify: claimVerifier(),
     })
     return json(200, { status: outcome.status, reason: outcome.reason, details: outcome.record.details })
   }
