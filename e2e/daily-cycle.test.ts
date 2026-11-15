@@ -124,7 +124,9 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(retry?.status).toBe('skipped')
     expect((pg.query(`select published_at from public.editions where edition_date = '${TODAY}'`)[0] as { published_at: string }).published_at).toBe(stamp)
     expect(pg.query(`select 1 from public.editions where status = 'published' and edition_date = '${TODAY}'`)).toHaveLength(1)
-    expect(world.alerts).toEqual([])
+    // The photo library is empty in this scenario, so the one message sent says so; nothing else went wrong.
+    expect(world.alerts).toHaveLength(1)
+    expect(world.alerts[0]).toMatch(/5 of 5 stories without an approved photo/)
   })
 
   // ── feature flag and manual control ──────────────────────────────────
@@ -336,6 +338,20 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(todayRow()).toMatchObject({ status: 'draft' })
     expect(publicDates()).toEqual([YESTERDAY])
     expect(world.alerts.join(' ')).toMatch(/Held for an editor/)
+  })
+
+  it('a story the claim check cannot confirm is replaced by a confirmed backup, and the edition still publishes', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const drafted = (storiesOf('primary') as { headline: string }[]).map((s) => s.headline)
+    world.reset({ claimCheck: 'unsure' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status, out?.reason).toBe('published')
+    const live = publicHeadlines(TODAY).map((s) => s.headline)
+    expect(live).toHaveLength(5)
+    if (drafted.some((h) => /turtle/i.test(h))) expect(live.join(' ')).not.toMatch(/turtle/i)
+    expect(out?.record.details.needsReview?.length ?? 0).toBeGreaterThan(0)
   })
 
   it('if every story’s claims conflict with its source, nothing is published', async () => {

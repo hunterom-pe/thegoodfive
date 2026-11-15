@@ -18,6 +18,8 @@ export interface Verification {
   verdict: Verdict
   /** Plain-English reasons, for the editor. Empty when verified. */
   issues: string[]
+  /** True when the check itself could not run (provider down, timeout, not configured), as opposed to running and not confirming. */
+  unavailable?: boolean
 }
 
 export interface VerifyInput {
@@ -100,7 +102,7 @@ export function aiClaimVerifier(ai: AiClient): ClaimVerifier {
       })
       return judge(raw, input)
     } catch (e) {
-      return { verdict: 'inconclusive', issues: [`The claim check could not run: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}`] }
+      return { verdict: 'inconclusive', unavailable: true, issues: [`The claim check could not run: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}`] }
     }
   }
 }
