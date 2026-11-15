@@ -79,15 +79,21 @@ const NEGATIVE = /\b(kill|dead|death|crash|scandal|bomb|shoot|terror|tragedy|dis
  * really in the article, and it cites that sentence; anything else is "not_in_source".
  */
 function fakeClaimCheck(user: string, mode: 'ok' | 'conflict' | 'down' | 'unsure'): unknown {
-  const summary = /SUMMARY: ([\s\S]*?)\n\nARTICLE TEXT:/.exec(user)?.[1] ?? ''
+  // The real prompt numbers the statements: "[H] headline", "[S1] first sentence"...
+  const listed = [...user.slice(0, user.indexOf('ARTICLE TEXT:')).matchAll(/^\[([A-Z0-9a-z]+)\] (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }))
   const article = user.slice(user.indexOf('ARTICLE TEXT:') + 13)
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-  const claims = summary.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 3).map((claim) => {
-    const there = norm(article).includes(norm(claim)) && !(mode === 'unsure' && /turtle/i.test(summary))
-    if (mode === 'conflict' && there) return { claim, verdict: 'contradicted', evidence: claim }
-    return there ? { claim, verdict: 'supported', evidence: claim } : { claim, verdict: 'not_in_source', evidence: '' }
-  })
-  return { claims }
+  const firstSentence = article.trim().split(/(?<=[.!?])\s+/)[0]
+  const unsure = mode === 'unsure' && listed.some((x) => /turtle/i.test(x.text))
+  return {
+    statements: listed.map(({ id, text }) => {
+      // The headline paraphrases the article; the fake cites the article's opening sentence for it, as a real reader would.
+      const there = (id === 'H' || norm(article).includes(norm(text))) && !unsure
+      const evidence = id === 'H' ? firstSentence : text
+      if (mode === 'conflict' && there) return { id, claims: [{ claim: text, verdict: 'contradicted', evidence }] }
+      return { id, claims: [there ? { claim: text, verdict: 'supported', evidence } : { claim: text, verdict: 'not_in_source', evidence: '' }] }
+    }),
+  }
 }
 
 function fakeModel(body: { messages: { role: string; content: string }[]; response_format?: { json_schema?: { name?: string } } }, mode: AiMode, claimCheck: 'ok' | 'down' | 'conflict' | 'unsure' = 'ok'): unknown {
