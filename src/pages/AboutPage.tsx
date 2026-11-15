@@ -80,7 +80,7 @@ export function AboutPage() {
             We summarise; we don’t republish. Every story names the outlet that reported it, shows when it was published, and links straight to the original. The reporting is theirs, and we’d encourage you to read it in full.
           </p>
           <p>
-            Photographs appear only when we’re confident we have the right to show them, and are credited when they do. Automatic editions usually use a composition of squares instead, because the licensed photo services we use ask for a person to choose each picture. An editor can add a photo afterwards. A news site’s preview image is not an invitation to reuse it.
+            Photographs appear only when we’re confident we have the right to show them, and are credited when they do. Automatic editions use photos an editor has already chosen and saved, credited to the photographer and always labelled illustrative. When nothing fits a story, you’ll see the composition of squares instead. A news site’s preview image is not an invitation to reuse it.
           </p>
           <p>If we get something wrong, we correct the story and say so.</p>
         </Section>
