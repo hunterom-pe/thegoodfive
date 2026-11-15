@@ -322,6 +322,54 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(pg.query(`select 1 from public.editions where status = 'published' and edition_date = '${TODAY}'`)).toHaveLength(1)
   })
 
+  // ── claim verification before publishing ─────────────────────────────
+  it('if the claim check is unavailable at 7:00 AM, the edition is held for an editor and nothing is published', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    world.reset({ claimCheck: 'down' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('failed')
+    expect(out?.reason).toMatch(/Held for an editor/)
+    expect(todayRow()).toMatchObject({ status: 'draft' })
+    expect(publicDates()).toEqual([YESTERDAY])
+    expect(world.alerts.join(' ')).toMatch(/Held for an editor/)
+  })
+
+  it('if every story’s claims conflict with its source, nothing is published', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    world.reset({ claimCheck: 'conflict' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('failed')
+    expect(todayRow()).toMatchObject({ status: 'draft' })
+    expect(publicDates()).toEqual([YESTERDAY])
+  })
+
+  // ── photos from the editor's library ─────────────────────────────────
+  it('a scheduled edition uses editor-approved library photos: no Unsplash search, credited, and published', async () => {
+    seedPublished(YESTERDAY)
+    const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`
+    pg.query(`insert into public.photo_library (id, unsplash_id, url, alt, credit, credit_url, source_url, download_location, categories, keywords, generic)
+      values ('${id(1)}', 'nat1', 'https://images.unsplash.com/photo-nat1?ixid=abc', 'A calm river in morning light', 'Ada Lens', 'https://unsplash.com/@ada', 'https://unsplash.com/photos/nat1', 'https://api.unsplash.com/photos/nat1/download?ixid=abc', '{nature}', '{river,salmon,turtle,bees}', true),
+             ('${id(2)}', 'hum1', 'https://images.unsplash.com/photo-hum1?ixid=abc', 'A village hall in sunshine', 'Bo Frame', 'https://unsplash.com/@bo', 'https://unsplash.com/photos/hum1', 'https://api.unsplash.com/photos/hum1/download?ixid=abc', '{humanity}', '{village,library,community}', true) returning id`)
+    await scheduledDraft('schedule', { db })
+    const generation = await waitForGeneration()
+    expect(generation.status, String(generation.error)).toBe('succeeded')
+    const withLibrary = pg.query(`select image_source, image_kind, image_rights_confirmed, image_editor_approved, image_credit from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.role = 'primary' and s.image_source = 'unsplash'`) as { image_kind: string; image_rights_confirmed: boolean; image_editor_approved: boolean; image_credit: string }[]
+    expect(withLibrary.length).toBeGreaterThan(0)
+    for (const s of withLibrary) expect(s).toMatchObject({ image_kind: 'illustrative', image_rights_confirmed: true, image_editor_approved: true })
+    // Unsplash was only ever told a photo was used. It was never searched.
+    expect(world.log.filter((u) => u.includes('api.unsplash.com') && u.includes('/search/'))).toEqual([])
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status, out?.reason).toBe('published')
+    const shown = pg.query(`select image_credit, image_kind from public.public_stories where image_url is not null`, 'anon') as { image_credit: string; image_kind: string }[]
+    expect(shown.length).toBe(withLibrary.length)
+    for (const s of shown) expect(s.image_kind).toBe('illustrative')
+    expect(pg.query(`select use_count from public.photo_library where use_count > 0`).length).toBeGreaterThan(0)
+  })
+
   // ── generation taking too long ───────────────────────────────────────
   it('a run that takes too long is stopped, recorded as failed, and the previous edition stays', async () => {
     seedPublished(YESTERDAY)

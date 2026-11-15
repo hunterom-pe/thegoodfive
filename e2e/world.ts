@@ -23,6 +23,8 @@ export interface WorldState {
   gone: Set<string>
   /** Delay every AI answer by this many ms. */
   aiDelayMs: number
+  /** The claim-by-claim check run before publishing: fine, unavailable, or finding a conflict in every story. */
+  claimCheck: 'ok' | 'down' | 'conflict'
 }
 
 const TRUSTED = [
@@ -70,9 +72,26 @@ const page = (a: Article) =>
 const NEGATIVE = /\b(kill|dead|death|crash|scandal|bomb|shoot|terror|tragedy|disaster|layoff|lawsuit|outbreak|flood|collapse|sues)/i
 
 /** A deterministic stand-in for the language model that answers the real prompts the pipeline sends. */
-function fakeModel(body: { messages: { role: string; content: string }[]; response_format?: { json_schema?: { name?: string } } }, mode: AiMode): unknown {
+/**
+ * The claim-by-claim reader. Honest like the real one has to be: a sentence is "supported" only when it is
+ * really in the article, and it cites that sentence; anything else is "not_in_source".
+ */
+function fakeClaimCheck(user: string, mode: 'ok' | 'conflict' | 'down'): unknown {
+  const summary = /SUMMARY: ([\s\S]*?)\n\nARTICLE TEXT:/.exec(user)?.[1] ?? ''
+  const article = user.slice(user.indexOf('ARTICLE TEXT:') + 13)
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const claims = summary.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 3).map((claim) => {
+    const there = norm(article).includes(norm(claim))
+    if (mode === 'conflict' && there) return { claim, verdict: 'contradicted', evidence: claim }
+    return there ? { claim, verdict: 'supported', evidence: claim } : { claim, verdict: 'not_in_source', evidence: '' }
+  })
+  return { claims }
+}
+
+function fakeModel(body: { messages: { role: string; content: string }[]; response_format?: { json_schema?: { name?: string } } }, mode: AiMode, claimCheck: 'ok' | 'down' | 'conflict' = 'ok'): unknown {
   const user = body.messages.find((m) => m.role === 'user')?.content ?? ''
   const name = body.response_format?.json_schema?.name
+  if (name === 'claim_check') return fakeClaimCheck(user, claimCheck)
   const list = JSON.parse(user.slice(user.indexOf('[')))
   if (name === 'screening') {
     return {
@@ -92,7 +111,7 @@ function fakeModel(body: { messages: { role: string; content: string }[]; respon
 export interface Sent { url: string; init?: RequestInit }
 
 export class World {
-  state: WorldState = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0 }
+  state: WorldState = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok' }
   /** Everything fetched, so tests can assert what did (and did not) happen. */
   log: string[] = []
   blocked: string[] = []
@@ -109,7 +128,7 @@ export class World {
     if (this.real) globalThis.fetch = this.real
   }
   reset(over: Partial<WorldState> = {}) {
-    this.state = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, ...over }
+    this.state = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok', ...over }
     this.log = []; this.blocked = []; this.alerts = []
   }
   calls = (needle: string) => this.log.filter((u) => u.includes(needle)).length
@@ -127,7 +146,9 @@ export class World {
       if (this.state.aiDelayMs) await new Promise((r) => setTimeout(r, this.state.aiDelayMs))
       if (this.state.ai === 'hang') return this.hang(init)
       if (this.state.ai === 'error500') return text('{"error":"upstream failure"}', 500, 'application/json')
-      const content = JSON.stringify(fakeModel(JSON.parse(String(init?.body)), this.state.ai))
+      const parsed = JSON.parse(String(init?.body))
+      if (this.state.claimCheck === 'down' && parsed.response_format?.json_schema?.name === 'claim_check') return text('{"error":"claim check unavailable"}', 500, 'application/json')
+      const content = JSON.stringify(fakeModel(parsed, this.state.ai, this.state.claimCheck))
       return text(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content } }] }), 200, 'application/json')
     }
     if (u.host === 'hooks.example.com') {
