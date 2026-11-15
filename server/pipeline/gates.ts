@@ -237,6 +237,7 @@ export function evaluateStory(s: GateStory, ctx: GateContext): GateResult {
     const claims = checkClaims(headline, summary, material)
     for (const f of claims.findings) fail(f.kind === 'unsupported_conclusion' ? 'conclusion_unsupported' : 'claim_contradiction', f.message)
     unaligned = claims.unaligned
+    for (const u of claims.unaligned) warnings.push(`Not found in the source, so only the claim check can confirm it: "${u.slice(0, 90)}".`)
 
     // Early-stage science and health must say so; and never be sold as a cure.
     if (['health', 'science'].includes(s.category) && PRELIMINARY_IN_SOURCE.test(material) && !HEDGE_IN_SUMMARY.test(summary))

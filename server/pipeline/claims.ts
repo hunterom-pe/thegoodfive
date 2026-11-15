@@ -1,3 +1,5 @@
+import { clausesOf, meaningWords } from './verify.ts'
+
 /**
  * Claim-level checks: does what the summary SAYS match what the source says?
  *
@@ -238,5 +240,16 @@ export function checkClaims(headline: string, summary: string, material: string)
   }
 
   for (const message of unitMismatches(text, material)) findings.push({ kind: 'unit_mismatch', claim: text.slice(0, 120), message })
+
+  // A sentence can match the source as a whole while one clause of it ("... and created jobs") appears nowhere
+  // in it. Report such clauses: these checks cannot confirm them, so the claim verifier has to.
+  const sourceWords = new Set(meaningWords(material))
+  for (const sentence of sentencesOf(summary)) {
+    for (const clause of clausesOf(sentence)) {
+      const words = meaningWords(clause)
+      const found = words.filter((w) => sourceWords.has(w)).length
+      if (words.length >= 1 && found / words.length < 0.5 && !unaligned.includes(sentence)) unaligned.push(clause)
+    }
+  }
   return { findings, unaligned }
 }

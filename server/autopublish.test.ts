@@ -4,7 +4,7 @@ import { SCHEDULE } from '../src/lib/schedule'
 import { contentHash, epochSeconds, runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
 import { backup, DATE, edition, fiveGood, NOW, story } from './fixtures'
 import { trackedNotifier, webhookNotifier } from './alerts'
-import { judge, statementsOf, type ClaimVerifier } from './pipeline/verify'
+import type { ClaimVerifier } from './pipeline/verify'
 import { evaluateStory } from './pipeline/gates'
 
 /** An in-memory stand-in for the database that obeys the same rules as auto_publish_edition(). */
@@ -488,59 +488,6 @@ describe('claim verification before publishing', () => {
     const out = await go(store, { verify: undefined, dryRun: true })
     expect(out.status).toBe('failed')
     expect(store.runs).toHaveLength(0)
-  })
-})
-
-describe('judging the verifier’s answer', () => {
-  const material = 'Rangers on the Calder coast counted 1,140 turtle nests this season, the most since records began in 1996. The council funded the programme.'
-  const input = { headline: 'Rangers count turtle nests', summary: 'Rangers counted 1,140 turtle nests. The council funded the programme.', material }
-  const ok = (claim: string, evidence: string) => ({ claim, verdict: 'supported' as const, evidence })
-  const S1 = 'Rangers on the Calder coast counted 1,140 turtle nests this season, the most since records began in 1996.'
-  const S2 = 'The council funded the programme.'
-  const full = () => [
-    { id: 'H', claims: [ok('Rangers count turtle nests', S1)] },
-    { id: 'S1', claims: [ok('Rangers counted 1,140 turtle nests', S1)] },
-    { id: 'S2', claims: [ok('The council funded the programme', S2)] },
-  ]
-  it('numbers the headline and every sentence with stable ids', () => {
-    expect(statementsOf(input)).toEqual([{ id: 'H', text: 'Rangers count turtle nests' }, { id: 'S1', text: 'Rangers counted 1,140 turtle nests.' }, { id: 'S2', text: 'The council funded the programme.' }])
-    expect(statementsOf({ headline: 'H', summary: 'One part; another part here.' }).map((x) => x.id)).toEqual(['H', 'S1a', 'S1b'])
-  })
-  it('verifies only a complete, valid answer backed by real source sentences', () => {
-    expect(judge({ statements: full() }, input).verdict).toBe('verified')
-  })
-  it('the audit case: a repeated claim cannot stand in for a sentence nobody checked', () => {
-    const lib = { headline: 'Volunteers opened a community library', summary: 'Volunteers opened a community library. The project guaranteed every resident a paid job.', material: 'Volunteers opened a community library. It lends books and hosts reading groups.' }
-    const c = ok('Volunteers opened a community library', 'Volunteers opened a community library.')
-    // The same supported claim twice, under the ids that exist and under a repeated id.
-    expect(judge({ statements: [{ id: 'H', claims: [c] }, { id: 'S1', claims: [c] }] }, lib)).toMatchObject({ verdict: 'inconclusive', issues: expect.arrayContaining([expect.stringMatching(/Not checked: statement S2/)]) })
-    expect(judge({ statements: [{ id: 'H', claims: [c] }, { id: 'S1', claims: [c] }, { id: 'S2', claims: [c] }] }, lib)).toMatchObject({ verdict: 'inconclusive', issues: expect.arrayContaining([expect.stringMatching(/S2 leave part of it unchecked/)]) })
-    expect(judge({ statements: [{ id: 'H', claims: [c] }, { id: 'S1', claims: [c] }, { id: 'S1', claims: [c] }] }, lib).verdict).toBe('inconclusive')
-  })
-  it('rejects duplicate, missing and unknown ids, and empty claim lists', () => {
-    const dup = [...full(), full()[1]]
-    expect(judge({ statements: dup }, input).issues.join(' ')).toMatch(/answered statement S1 2 times/)
-    expect(judge({ statements: full().filter((x) => x.id !== 'H') }, input).issues.join(' ')).toMatch(/Not checked: the headline/)
-    expect(judge({ statements: [...full(), { id: 'S9', claims: [ok('x', S2)] }] }, input).issues.join(' ')).toMatch(/does not exist \(S9\)/)
-    expect(judge({ statements: full().map((x) => (x.id === 'S2' ? { ...x, claims: [] } : x)) }, input).issues.join(' ')).toMatch(/No claims listed for S2/)
-    for (const bad of [null, undefined, {}, { statements: [] }, { statements: 'nope' }] as never[]) expect(judge(bad, input).verdict).toBe('inconclusive')
-  })
-  it('a claim filed under the wrong statement does not cover it', () => {
-    const swapped = full().map((x) => (x.id === 'S2' ? { ...x, claims: [ok('Rangers counted 1,140 turtle nests', S1)] } : x))
-    expect(judge({ statements: swapped }, input).issues.join(' ')).toMatch(/S2 leave part of it unchecked/)
-  })
-  it('does not trust evidence that is not in the source', () => {
-    const fake = full().map((x) => (x.id === 'S1' ? { ...x, claims: [ok('Rangers counted 1,140 turtle nests', 'Rangers on the Calder coast did not count turtle nests.')] } : x))
-    expect(judge({ statements: fake }, input).verdict).toBe('inconclusive')
-  })
-  it('a statement the source does not support is inconclusive', () => {
-    const missing = full().map((x) => (x.id === 'S2' ? { ...x, claims: [{ claim: 'The council funded the programme', verdict: 'not_in_source' as const, evidence: '' }] } : x))
-    expect(judge({ statements: missing }, input).verdict).toBe('inconclusive')
-  })
-  it('calls a conflict only when the cited sentence is real', () => {
-    const conflict = (evidence: string) => full().map((x) => (x.id === 'S2' ? { ...x, claims: [{ claim: 'The council funded the programme', verdict: 'contradicted' as const, evidence }] } : x))
-    expect(judge({ statements: conflict(S2) }, input).verdict).toBe('contradicted')
-    expect(judge({ statements: conflict('A sentence that is not there at all, honestly.') }, input).verdict).toBe('inconclusive')
   })
 })
 

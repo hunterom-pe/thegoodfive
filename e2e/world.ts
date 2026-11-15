@@ -79,19 +79,21 @@ const NEGATIVE = /\b(kill|dead|death|crash|scandal|bomb|shoot|terror|tragedy|dis
  * really in the article, and it cites that sentence; anything else is "not_in_source".
  */
 function fakeClaimCheck(user: string, mode: 'ok' | 'conflict' | 'down' | 'unsure'): unknown {
-  // The real prompt numbers the statements: "[H] headline", "[S1] first sentence"...
-  const listed = [...user.slice(0, user.indexOf('ARTICLE TEXT:')).matchAll(/^\[([A-Z0-9a-z]+)\] (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }))
-  const article = user.slice(user.indexOf('ARTICLE TEXT:') + 13)
+  // The real prompt lists each statement and, indented under it, its numbered clauses: "  [S1.2] and created jobs."
+  const head = user.slice(0, user.indexOf('ARTICLE TEXT:'))
+  const clauses = [...head.matchAll(/^\s+\[([A-Z][0-9]*\.[0-9]+)\] (.+)$/gm)].map((m) => ({ id: m[1], text: m[2] }))
+  const statements = [...head.matchAll(/^\[([A-Z][0-9]*)\] (.+)$/gm)].map((m) => m[2])
+  const article = user.slice(user.indexOf('ARTICLE TEXT:') + 13).trim()
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-  const firstSentence = article.trim().split(/(?<=[.!?])\s+/)[0]
-  const unsure = mode === 'unsure' && listed.some((x) => /turtle/i.test(x.text))
+  const sentences = article.split(/(?<=[.!?])\s+/)
+  const unsure = mode === 'unsure' && statements.some((t) => /turtle/i.test(t))
   return {
-    statements: listed.map(({ id, text }) => {
-      // The headline paraphrases the article; the fake cites the article's opening sentence for it, as a real reader would.
-      const there = (id === 'H' || norm(article).includes(norm(text))) && !unsure
-      const evidence = id === 'H' ? firstSentence : text
-      if (mode === 'conflict' && there) return { id, claims: [{ claim: text, verdict: 'contradicted', evidence }] }
-      return { id, claims: [there ? { claim: text, verdict: 'supported', evidence } : { claim: text, verdict: 'not_in_source', evidence: '' }] }
+    clauses: clauses.map(({ id, text }) => {
+      // The headline paraphrases the article: the fake cites the opening sentence for it, as a real reader would.
+      const evidence = id.startsWith('H.') ? sentences[0] : sentences.find((x) => norm(x).includes(norm(text)))
+      const there = Boolean(evidence) && !unsure
+      if (mode === 'conflict' && there) return { id, verdict: 'contradicted', evidence }
+      return there ? { id, verdict: 'supported', evidence } : { id, verdict: 'not_in_source', evidence: '' }
     }),
   }
 }
