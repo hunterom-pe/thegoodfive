@@ -122,7 +122,7 @@ describe('scheduled runs and the photo library', () => {
     expect(out).toMatchObject({ image_source: 'unsplash', image_kind: 'illustrative', image_rights_confirmed: true, image_library_id: 'L1', image_credit: 'Ada Lens' })
     expect(out.image_credit_url).toContain('utm_source=thegoodfive')
     expect(out.image_url).toContain('ixid=z')
-    expect(download).not.toHaveBeenCalled() // no key to send a notice with in this test
+    expect(download).toHaveBeenCalledWith('https://api.unsplash.com/photos/u1/download?ixid=z') // Unsplash is told the photo was used (an event notice, not a search)
   })
   it('never approves the publisher’s image: with no library match the story keeps only an unapproved candidate', async () => {
     const [out] = await attachImages([{ ...bees, category: 'health' }], sources(1), new Map(), { library: lib, today: '2026-11-16' })
