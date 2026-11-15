@@ -55,3 +55,31 @@ describe('writing metadata into the page', () => {
     expect(applyMeta(html, metaForPath('/'))).toContain(`<link rel="canonical" href="${SITE}/" />`)
   })
 })
+
+describe('special characters in metadata', () => {
+  const tag = (doc: string, re: RegExp) => re.exec(doc)?.[1]
+  const cases = [
+    'Company raises $1 million for a new library',
+    'Grant of $2 and $& and $` and $\' and $$ survives',
+    'A "quoted" headline & an ampersand <b>tag</b>',
+    'Café owners in São Paulo — 日本語 — emoji 🌱 too',
+  ]
+  for (const text of cases) {
+    it(`keeps "${text.slice(0, 30)}" literal and the page valid`, () => {
+      const out = applyMeta(html, { ...metaForPath('/about'), title: text, shareTitle: text, description: text })
+      const escaped = text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      expect(tag(out, /<title>([^<]*)<\/title>/)).toBe(escaped)
+      expect(tag(out, /name="description"\s+content="([^"]*)"/)).toBe(escaped)
+      expect(tag(out, /property="og:description" content="([^"]*)"/)).toBe(escaped)
+      expect(tag(out, /name="twitter:title" content="([^"]*)"/)).toBe(escaped)
+      // Exactly one of each tag: nothing was duplicated or spliced in.
+      expect(out.match(/<meta\s+name="description"/g)).toHaveLength(1)
+      expect(out.match(/<title>/g)).toHaveLength(1)
+      expect(out.match(/property="og:title"/g)).toHaveLength(1)
+    })
+  }
+  it('an edition description built from a money headline stays intact', () => {
+    const out = applyMeta(html, metaForPath('/edition/2026-11-14', { date: '2026-11-14', headlines: ['Town raises $1 million for clean water', 'Second'] }))
+    expect(tag(out, /name="description"\s+content="([^"]*)"/)).toContain('Town raises $1 million for clean water')
+  })
+})

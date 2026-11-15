@@ -83,17 +83,23 @@ export function metaForPath(pathname: string, edition?: EditionFacts | null): Pa
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-/** Write a route's metadata into the site's HTML. Tags it cannot find are left alone. */
+/**
+ * Write a route's metadata into the site's HTML. Tags it cannot find are left alone.
+ * Every replacement is a function, never a replacement string: in a string, "$1", "$&" or "$'" inside a
+ * headline ("raises $1 million") would be read as replacement syntax and corrupt the page.
+ */
 export function applyMeta(html: string, m: PageMeta): string {
-  const set = (re: RegExp, to: string) => (html = html.replace(re, to))
-  set(/<title>[\s\S]*?<\/title>/, `<title>${esc(m.title)}</title>`)
-  set(/(<meta\s+name="description"\s+content=")[^"]*(")/, `$1${esc(m.description)}$2`)
-  set(/(<link rel="canonical" href=")[^"]*(")/, `$1${esc(m.canonical)}$2`)
-  set(/(<meta property="og:url" content=")[^"]*(")/, `$1${esc(m.canonical)}$2`)
-  set(/(<meta property="og:title" content=")[^"]*(")/, `$1${esc(m.shareTitle)}$2`)
-  set(/(<meta property="og:description" content=")[^"]*(")/, `$1${esc(m.description)}$2`)
-  set(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${esc(m.shareTitle)}$2`)
-  set(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${esc(m.description)}$2`)
-  if (m.noindex && !/name="robots"/.test(html)) set(/<\/head>/, '    <meta name="robots" content="noindex, follow" />\n  </head>')
+  const attr = (re: RegExp, value: string) => {
+    html = html.replace(re, (_match, before: string, after: string) => before + esc(value) + after)
+  }
+  html = html.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${esc(m.title)}</title>`)
+  attr(/(<meta\s+name="description"\s+content=")[^"]*(")/, m.description)
+  attr(/(<link rel="canonical" href=")[^"]*(")/, m.canonical)
+  attr(/(<meta property="og:url" content=")[^"]*(")/, m.canonical)
+  attr(/(<meta property="og:title" content=")[^"]*(")/, m.shareTitle)
+  attr(/(<meta property="og:description" content=")[^"]*(")/, m.description)
+  attr(/(<meta name="twitter:title" content=")[^"]*(")/, m.shareTitle)
+  attr(/(<meta name="twitter:description" content=")[^"]*(")/, m.description)
+  if (m.noindex && !/name="robots"/.test(html)) html = html.replace(/<\/head>/, () => '    <meta name="robots" content="noindex, follow" />\n  </head>')
   return html
 }

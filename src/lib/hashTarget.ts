@@ -42,3 +42,18 @@ export function whenAvailable<T>(w: Waiter<T>): { result: Promise<T | null>; can
   timer = setTimer(() => finish(null), w.timeoutMs)
   return { result, cancel: () => finish(null) }
 }
+
+/**
+ * The element id a URL fragment points at, or null when there is none or it cannot be read.
+ * "#%" or "#%E0%A4" are not valid percent-encoding: decoding them throws, which must never take the
+ * page down. Such a fragment simply points nowhere.
+ */
+export function hashToId(hash: string): string | null {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash
+  if (!raw) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+}

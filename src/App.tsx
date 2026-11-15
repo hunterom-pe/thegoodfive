@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { PageLoading } from './components/PageStates'
-import { whenAvailable } from './lib/hashTarget'
+import { hashToId, whenAvailable } from './lib/hashTarget'
 import { HomePage } from './pages/HomePage'
 
 // The home page ships in the main bundle; the rest load when first visited.
@@ -29,9 +30,10 @@ function ScrollManager() {
       firstNavigation = false
       return
     }
-    const id = decodeURIComponent(hash.slice(1))
+    const id = hashToId(hash)
     const cold = firstNavigation
     firstNavigation = false
+    if (!id) return // a fragment that cannot be decoded points nowhere: leave the page as it is
     const behavior: ScrollBehavior = cold ? 'instant' : 'auto'
     const find = () => document.getElementById(id)
     const wait = whenAvailable({
@@ -89,6 +91,7 @@ export default function App() {
         Skip to the stories
       </a>
       <div id="main" className="contents">
+        <ErrorBoundary>
         <Suspense fallback={<PageLoading label="Opening…" />}>
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -106,6 +109,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
         </Suspense>
+        </ErrorBoundary>
       </div>
     </BrowserRouter>
   )
