@@ -4,6 +4,7 @@ import { dismissProgress, readerStores, recordProgress, resumeOffer, toggleSaved
 import { storyScrollTarget, useReadingPosition } from '../lib/readingPosition'
 import type { PublicEdition, PublicStory } from '../lib/types'
 import { wrap } from './Brand'
+import { ImageShareButton } from './ImageShare'
 import { two } from './StoryParts'
 
 /**
@@ -218,5 +219,33 @@ export function ResumeReading() {
         </div>
       </div>
     </aside>
+  )
+}
+
+/** Under each story: keep it, or make a share card of it. */
+export function StoryActions({ story }: { story: PublicStory }) {
+  const reader = useReader()
+  if (!reader?.interactive) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-5">
+      <SaveButton story={story} />
+      <ImageShareButton
+        what={{ kind: 'story', story, edition: reader.edition }}
+        label="Share card"
+        className="inline-flex min-h-11 items-center gap-2 text-[0.875rem] font-semibold text-forest link-quiet"
+      />
+    </div>
+  )
+}
+
+/** The edition's keepsake, offered quietly on the back cover. */
+export function KeepsakeButton({ edition }: { edition: PublicEdition }) {
+  const reader = useReader()
+  if (!reader?.interactive) return null
+  return (
+    <p className="mt-10 text-[0.9375rem] text-chalk/80">
+      <ImageShareButton what={{ kind: 'edition', edition }} label="Keep this edition’s cover" className="font-semibold text-chalk underline decoration-chalk/40 underline-offset-4 hover:decoration-chalk" />
+      <span className="ml-2 text-chalk/60">An image of this edition’s five, to save or share.</span>
+    </p>
   )
 }

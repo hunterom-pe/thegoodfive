@@ -5,6 +5,7 @@ import { FiveSquares, wrap } from './Brand'
 import type { EditionContext } from './EditionHero'
 import { Reveal } from './Reveal'
 import { TakeOne } from './TakeOne'
+import { KeepsakeButton } from './ReaderTools'
 
 /** The back cover. Five squares, three lines, and one optional question. Nothing asks the reader to come back. */
 export function EditionClosing({ edition, context }: { edition: PublicEdition; context: EditionContext }) {
@@ -33,6 +34,7 @@ export function EditionClosing({ edition, context }: { edition: PublicEdition; c
           </p>
         </Reveal>
         <TakeOne edition={edition} />
+        <KeepsakeButton edition={edition} />
         <div className="label mt-20 flex items-center justify-between gap-4 border-t border-chalk/25 pt-5 text-chalk/70 lg:mt-32">
           <span>The Good Five</span>
           <time dateTime={edition.date} className="text-right">

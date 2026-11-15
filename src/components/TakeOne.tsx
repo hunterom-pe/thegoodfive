@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { readerStores, storyUrl, toggleSaved, useStore } from '../lib/reader'
 import type { PublicEdition } from '../lib/types'
+import { ImageShareButton } from './ImageShare'
 import { useReader } from './ReaderTools'
 import { two } from './StoryParts'
 
@@ -97,6 +98,7 @@ export function TakeOne({ edition }: { edition: PublicEdition }) {
             <button type="button" className="btn btn-solid !bg-chalk !text-forest hover:!bg-blush" onClick={() => void shareIt()}>
               Share a link
             </button>
+            <ImageShareButton what={{ kind: 'story', story: picked, edition }} label="Make a share card" className="btn !border-chalk !text-chalk hover:!bg-forest-deep" />
             <button type="button" className="btn !border-transparent !text-chalk/75 underline underline-offset-4 hover:!bg-transparent hover:!text-chalk" onClick={clear}>
               Clear my pick
             </button>

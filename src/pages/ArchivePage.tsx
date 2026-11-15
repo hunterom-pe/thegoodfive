@@ -5,6 +5,7 @@ import { DemoNotice } from '../components/EditionView'
 import { PageLoading, PageMessage } from '../components/PageStates'
 import { SiteFooter } from '../components/SiteFooter'
 import { SiteHeader } from '../components/SiteHeader'
+import { EditionCover } from '../components/EditionCover'
 import { two } from '../components/StoryParts'
 import { publicRepo } from '../data/publicRepo'
 import { CATEGORIES } from '../lib/categories'
@@ -23,6 +24,8 @@ function EditionRow({ edition, isToday }: { edition: EditionSummary; isToday: bo
         <div>
           <span className="display block text-[2.75rem] !leading-[0.85] tabular-nums lg:text-[4rem]">{two(Number(edition.date.slice(8)))}</span>
           <span className="label mt-2.5 block text-earth">{isToday ? 'Today' : weekday(edition.date)}</span>
+          {/* The edition's cover, small: decorative here, because the headlines beside it say what is inside. */}
+          <EditionCover date={edition.date} categories={edition.stories.map((s) => s.category)} framed className="mt-3 size-12 text-forest sm:size-14 lg:size-16" />
         </div>
         <div>
           {lead && (

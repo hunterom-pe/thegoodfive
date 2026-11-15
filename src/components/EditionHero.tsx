@@ -3,6 +3,7 @@ import { formatDayMonth, formatLong, formatWeekday } from '../lib/dates'
 import type { PublicEdition } from '../lib/types'
 import { wrap } from './Brand'
 import { two } from './StoryParts'
+import { EditionCover } from './EditionCover'
 
 export type EditionContext = 'today' | 'latest' | 'archive'
 
@@ -56,11 +57,8 @@ export function EditionHero({ edition, context }: { edition: PublicEdition; cont
         {/* Squares: a quiet composition that anchors the hero's right edge. */}
         <div className="relative mt-8 flex items-end justify-between gap-6 lg:col-span-4 lg:mt-0 lg:flex-col lg:items-stretch lg:justify-end">
           <p className="max-w-[17.5rem] text-[0.9375rem] leading-[1.55] text-ink/75 lg:order-2 lg:mt-8 lg:max-w-none">{text.note}</p>
-          <div className="relative size-[4.75rem] shrink-0 lg:order-1 lg:size-32 lg:self-end" aria-hidden="true">
-            <span className="absolute right-0 top-0 size-[72%] bg-sage" />
-            <span className="absolute bottom-0 left-0 size-[46%] border border-forest" />
-            <span className="absolute bottom-[14%] left-[32%] size-[24%] bg-blush" />
-          </div>
+          {/* This edition's cover: its own arrangement of the five squares (see EditionCover). */}
+          <EditionCover date={edition.date} categories={edition.stories.map((s) => s.category)} label className="size-[5.5rem] shrink-0 lg:order-1 lg:size-36 lg:self-end" />
         </div>
       </div>
 
