@@ -30,6 +30,37 @@ export function goToStory(n: number, fraction = 0) {
   window.scrollTo({ top, behavior: prefersReducedMotion() ? 'instant' : 'smooth' })
   if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1')
   el.focus({ preventScroll: true })
+  settleOn(n, fraction)
+}
+
+let settling: (() => void) | null = null
+
+/**
+ * Fonts, photos and reveals settle after the jump (and a smooth scroll is aimed at where the page was when it
+ * started), so check the target again once things have stopped moving. Any touch, key press or wheel from the
+ * reader cancels it: it never fights them.
+ */
+function settleOn(n: number, fraction: number) {
+  settling?.()
+  const events = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const stop = () => {
+    timers.forEach(clearTimeout)
+    events.forEach((e) => window.removeEventListener(e, stop))
+    if (settling === stop) settling = null
+  }
+  settling = stop
+  events.forEach((e) => window.addEventListener(e, stop, { passive: true, once: true }))
+  const smooth = !prefersReducedMotion()
+  for (const ms of smooth ? [900, 1800] : [350, 1200]) {
+    timers.push(
+      setTimeout(() => {
+        const again = storyScrollTarget(n, fraction)
+        if (again !== null && Math.abs(again - window.scrollY) > 8) window.scrollTo({ top: again, behavior: 'instant' })
+        if (ms === (smooth ? 1800 : 1200)) stop()
+      }, ms),
+    )
+  }
 }
 
 /** A link to a story anchor that scrolls there (respecting reduced motion), updates the URL and moves focus. */

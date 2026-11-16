@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createLocalStore, type KeyValueStorage } from './localStore'
-import { measurePosition } from './readingPosition'
+import { measurePosition, scrollTargetFor } from './readingPosition'
 import {
   dismissProgress,
   makeReaderStores,
@@ -186,5 +186,32 @@ describe('storage that misbehaves', () => {
     off()
     store.set([2])
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── restoring the reading position ───────────────────────────────────
+describe('restoring where the reader was', () => {
+  // Five stories of unequal height laid out down a page; the header leaves 72px.
+  const heights = [900, 1100, 1000, 1300, 1050]
+  const tops = heights.map((_, i) => 400 + heights.slice(0, i).reduce((a, b) => a + b, 0))
+  const view = (scrollY: number) => heights.map((h, i) => ({ n: i + 1, top: tops[i] - scrollY, height: h }))
+  it('returns to the same story and place for every story, fraction and screen height', () => {
+    for (const vh of [568, 700, 844, 932]) {
+      for (let n = 1; n <= 5; n++) {
+        for (const fraction of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99]) {
+          const s = { top: tops[n - 1], height: heights[n - 1] }
+          const y = scrollTargetFor(s, fraction, 0, vh, 72)
+          const got = measurePosition(view(y), null, vh)
+          expect(got.story, `story ${n} at ${fraction}, ${vh}px`).toBe(n)
+          // Near a story's start the story is shown from its top (just under the header): same story, never an earlier one.
+          expect(got.fraction).toBeGreaterThanOrEqual(fraction - 0.02)
+          if (fraction >= 0.3) expect(Math.abs(got.fraction - fraction)).toBeLessThan(0.02)
+        }
+      }
+    }
+  })
+  it('does not land in the next story from the end of one', () => {
+    const y = scrollTargetFor({ top: tops[2], height: heights[2] }, 0.95, 0, 844, 72)
+    expect(measurePosition(view(y), null, 844).story).toBe(3)
   })
 })

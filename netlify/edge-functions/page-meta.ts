@@ -1,4 +1,4 @@
-import { applyMeta, metaForPath, type EditionFacts } from '../../src/lib/meta.ts'
+import { applyMeta, metaForPath, statusForPath, type EditionFacts } from '../../src/lib/meta.ts'
 
 /**
  * Writes each page's own title, description, canonical address and sharing tags into the HTML before it
@@ -10,13 +10,17 @@ export default async (request: Request, context: { next: () => Promise<Response>
   try {
     if (!(response.headers.get('content-type') ?? '').includes('text/html')) return response
     const url = new URL(request.url)
+    // The editor and the raw index file have their own headers and no public metadata.
+    if (/^\/(editor(\/|$)|index\.html$)/.test(url.pathname)) return response
     let facts: EditionFacts | null = null
     const m = /^\/edition\/(\d{4}-\d{2}-\d{2})\/?$/.exec(url.pathname)
     if (m) facts = await lookup(m[1])
     const html = applyMeta(await response.text(), metaForPath(url.pathname, facts))
     const headers = new Headers(response.headers)
     headers.delete('content-length')
-    return new Response(html, { status: response.status, headers })
+    // The site's catch-all answers 200 for everything; say 404 for pages that do not exist (and keep any other status).
+    const status = response.status === 200 ? statusForPath(url.pathname, facts) : response.status
+    return new Response(html, { status, headers })
   } catch {
     return response
   }
@@ -43,4 +47,8 @@ async function lookup(date: string): Promise<EditionFacts | null> {
   }
 }
 
-export const config = { path: ['/', '/about', '/archive', '/saved', '/edition/*'] }
+// Every path, so that made-up addresses get their 404 too; static files and the sitemap are left out.
+export const config = {
+  path: '/*',
+  excludedPath: ['/assets/*', '/.netlify/*', '/sitemap.xml', '/robots.txt', '/manifest.webmanifest', '/favicon*', '/apple-touch-icon.png', '/icon-*', '/og-image.png', '/logo.svg'],
+}

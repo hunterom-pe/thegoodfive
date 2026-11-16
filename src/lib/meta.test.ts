@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyMeta, metaForPath, SITE } from './meta'
+import { applyMeta, metaForPath, SITE, sitemapXml, statusForPath } from './meta'
 import html from '../../index.html?raw'
 
 const tag = (doc: string, re: RegExp) => re.exec(doc)?.[1]
@@ -89,5 +89,25 @@ describe('the saved-stories page', () => {
     const m = metaForPath('/saved')
     expect(m).toMatchObject({ title: 'Saved stories — The Good Five', canonical: `${SITE}/saved`, noindex: true })
     expect(applyMeta(html, m)).toContain('<meta name="robots" content="noindex, follow" />')
+  })
+})
+
+describe('HTTP status and the sitemap', () => {
+  it('answers 200 for real pages and the editor, 404 for made-up addresses and impossible dates', () => {
+    for (const ok of ['/', '/about', '/archive/', '/saved', '/editor', '/editor/automation', '/edition/2026-11-13', '/edition/2099-01-01']) expect(statusForPath(ok), ok).toBe(200)
+    for (const gone of ['/nope', '/about/team', '/edition', '/edition/not-a-date', '/edition/2026-02-30', '/edition/2026-11-13/extra']) expect(statusForPath(gone), gone).toBe(404)
+  })
+  it('answers 404 for an edition the database says does not exist, and 200 when it could not be asked', () => {
+    expect(statusForPath('/edition/2026-11-12', { date: '2026-11-12', exists: false })).toBe(404)
+    expect(statusForPath('/edition/2026-11-12', { date: '2026-11-12', exists: true })).toBe(200)
+    expect(statusForPath('/edition/2026-11-12', null)).toBe(200)
+  })
+  it('lists the indexable pages and each published edition once, newest first, and nothing private', () => {
+    const xml = sitemapXml(['2026-11-13', '2026-11-15', '2026-11-13', 'not-a-date', '2026-02-30'])
+    expect(xml.startsWith('<?xml')).toBe(true)
+    const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
+    expect(locs).toEqual(['https://thegoodfive.netlify.app/', 'https://thegoodfive.netlify.app/about', 'https://thegoodfive.netlify.app/archive', 'https://thegoodfive.netlify.app/edition/2026-11-15', 'https://thegoodfive.netlify.app/edition/2026-11-13'])
+    expect(xml).not.toMatch(/saved|editor/)
+    expect(xml).toContain('<loc>https://thegoodfive.netlify.app/edition/2026-11-15</loc><lastmod>2026-11-15</lastmod>')
   })
 })

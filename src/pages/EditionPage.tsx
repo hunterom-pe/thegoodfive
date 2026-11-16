@@ -26,8 +26,13 @@ export function EditionPage() {
     <>
       <SiteHeader progress={edition ? <StoryProgress count={edition.stories.length} /> : null} strip={edition ? <StoryStrip stories={edition.stories} /> : null} />
       <main>
-        {state.status === 'loading' && <PageLoading label="Opening the archive…" />}
-        {state.status === 'error' && (
+        {!valid && (
+          <PageMessage title="That isn’t an edition date." action={back}>
+            Editions have addresses like /edition/2026-11-13. Try the archive to find the one you want.
+          </PageMessage>
+        )}
+        {valid && state.status === 'loading' && <PageLoading label="Opening the archive…" />}
+        {valid && state.status === 'error' && (
           <PageMessage
             title="We couldn’t open that edition."
             action={
@@ -37,7 +42,8 @@ export function EditionPage() {
             }
           />
         )}
-        {state.status === 'ready' &&
+        {valid &&
+          state.status === 'ready' &&
           (edition ? (
             <EditionView edition={edition} context={edition.date === todayISO() ? 'today' : 'archive'} />
           ) : date === todayISO() ? (

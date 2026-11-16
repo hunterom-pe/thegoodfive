@@ -17,8 +17,11 @@ export interface ReadingPosition {
 const START: ReadingPosition = { story: 0, fraction: 0, finished: false }
 
 /** The pure measurement, given each story's top and height and the back cover's top (viewport coordinates). */
+/** Where the reading line sits, as a share of the viewport height. Measuring and restoring must use the same line. */
+export const READING_LINE = 0.45
+
 export function measurePosition(stories: { n: number; top: number; height: number }[], endTop: number | null, viewportHeight: number): ReadingPosition {
-  const line = viewportHeight * 0.45
+  const line = viewportHeight * READING_LINE
   let story = 0
   let fraction = 0
   for (const s of stories) {
@@ -96,11 +99,23 @@ export function useEditionFinished(): boolean {
   return useSyncExternalStore(subscribe, () => current.finished, () => false)
 }
 
-/** The y-coordinate to scroll to so that `fraction` of story `n` sits just below the sticky header. */
+/**
+ * The scroll position that puts `fraction` of a story back at the reading line, which is how that fraction was
+ * measured. (An earlier version placed it near the top, so a restored view sat a third of a screen further on
+ * than the place remembered, and near a story's end it landed in the next story.) A story's own top never sits
+ * lower than just under the sticky header, so a small fraction simply shows the story from its start.
+ */
+export function scrollTargetFor(story: { top: number; height: number }, fraction: number, scrollY: number, viewportHeight: number, padding: number): number {
+  const f = Math.min(1, Math.max(0, fraction))
+  const desiredTop = Math.min(padding, viewportHeight * READING_LINE - story.height * f)
+  return Math.max(0, scrollY + story.top - desiredTop)
+}
+
+/** The y-coordinate to scroll to so that `fraction` of story `n` sits at the reading line (see scrollTargetFor). */
 export function storyScrollTarget(n: number, fraction: number): number | null {
   const el = document.getElementById(`story-${n}`)
   if (!el) return null
   const r = el.getBoundingClientRect()
   const padding = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 72
-  return Math.max(0, window.scrollY + r.top + r.height * fraction - padding - window.innerHeight * 0.1 * Math.min(1, fraction * 4))
+  return scrollTargetFor({ top: r.top, height: r.height }, fraction, window.scrollY, window.innerHeight, padding)
 }

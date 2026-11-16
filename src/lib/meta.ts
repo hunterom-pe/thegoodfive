@@ -89,6 +89,38 @@ export function metaForPath(pathname: string, edition?: EditionFacts | null): Pa
   return { title: 'Page not found — The Good Five', shareTitle: 'Page not found', description: DEFAULT_DESCRIPTION, canonical: `${SITE}/`, noindex: true }
 }
 
+/**
+ * The HTTP status a path deserves. The site is one page that renders every route in the browser, so without
+ * this a made-up address, an impossible edition date or an edition that does not exist would all be answered
+ * "200 OK" and look like real pages to a crawler. Known pages and the editor are 200. Where the database could
+ * not be asked (`edition` absent), an edition date gets the benefit of the doubt.
+ */
+export function statusForPath(pathname: string, edition?: EditionFacts | null): 200 | 404 {
+  const path = pathname.replace(/\/+$/, '') || '/'
+  if (['/', '/about', '/archive', '/saved', '/index.html', '/editor'].includes(path) || path.startsWith('/editor/')) return 200
+  const m = /^\/edition\/([^/]+)$/.exec(path)
+  if (!m) return 404
+  if (!isRealDate(m[1])) return 404
+  return edition?.date === m[1] && edition.exists === false ? 404 : 200
+}
+
+/** The pages worth indexing, for the sitemap: the front page, About, the archive and every published edition. */
+export function sitemapXml(editionDates: string[], lastEdition?: string | null): string {
+  const url = (path: string, lastmod?: string | null) => `  <url><loc>${SITE}${path}</loc>${lastmod ? `<lastmod>${lastmod}</lastmod>` : ''}</url>`
+  const dates = [...new Set(editionDates.filter(isRealDate))].sort().reverse()
+  const latest = lastEdition ?? dates[0] ?? null
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    url('/', latest),
+    url('/about'),
+    url('/archive', latest),
+    ...dates.map((d) => url(`/edition/${d}`, d)),
+    '</urlset>',
+    '',
+  ].join('\n')
+}
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /**
