@@ -30,7 +30,7 @@ export function SavedPage() {
           </p>
           <h1 className="display mt-5 max-w-[12em] text-[2.5rem] sm:text-[3.5rem] lg:text-[4.5rem]">The good things you kept.</h1>
           <p className="mt-5 max-w-[36rem] text-[1rem] leading-relaxed text-ink/75">
-            Saved stories stay on this device, in this browser. There’s no account and nothing is sent anywhere, so they won’t follow you to another phone or computer, and clearing your browser’s data removes them.
+            Saved stories stay on this device, in this browser. There’s no account, and your saved list is never sent to us, so it won’t follow you to another phone or computer, and clearing your browser’s data removes it. Separately, the site uses Cloudflare Web Analytics to count visits and measure page speed; it doesn’t receive your saved list.
           </p>
           {!persistent && (
             <p role="status" className="mt-4 max-w-[36rem] border-l-2 border-earth pl-3 text-[0.9375rem] text-earth">
