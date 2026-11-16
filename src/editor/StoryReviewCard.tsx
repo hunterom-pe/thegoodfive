@@ -4,6 +4,7 @@ import { two } from '../components/StoryParts'
 import { CATEGORIES, CATEGORY_KEYS } from '../lib/categories'
 import { formatShort } from '../lib/dates'
 import { PhotoPanel } from './PhotoPanel'
+import { FollowUpsPanel } from './FollowUpsPanel'
 import type { Category, EditorStory, StoryPatch } from '../lib/types'
 
 export const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0)
@@ -37,7 +38,10 @@ export function StoryReviewCard({
   isFirst,
   isLast,
   actions,
+  editionDate,
 }: {
+  /** The date of this story's edition, for linking follow-ups. */
+  editionDate?: string
   story: EditorStory
   /** Published editions keep their lineup; words can still be corrected. */
   locked: boolean
@@ -207,6 +211,11 @@ export function StoryReviewCard({
         {/* The photo panel stays usable on a published edition: it changes only the image, never the words. */}
         <div className="p-4 pt-0 sm:p-5 sm:pt-0">
           <PhotoPanel story={story} value={{ ...story, ...patch }} set={set} busy={busy || saving} onApply={applyImage} imageDirty={Object.keys(patch).some((k) => k.startsWith('image'))} onSaveManual={() => applyImage(Object.fromEntries(Object.entries(patch).filter(([k]) => k.startsWith('image'))) as StoryPatch)} searchPhotos={actions.searchPhotos} saveToLibrary={actions.saveToLibrary} />
+          {editionDate && (
+            <div className="mt-5">
+              <FollowUpsPanel story={story} editionDate={editionDate} />
+            </div>
+          )}
         </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { IS_DEMO, SUPABASE_ANON_KEY, SUPABASE_URL } from '../lib/config'
 import { todayISO } from '../lib/dates'
+import { attachFollowUps, type FollowUpRow } from '../lib/followups'
 import type { Category, EditionSummary, ImageKind, EditorEdition, PublicEdition, PublicStory } from '../lib/types'
 
 /**
@@ -124,6 +125,20 @@ async function rest<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+/**
+ * Approved follow-up links touching these stories. Optional context: if the view is missing (migration not yet
+ * run) or the request fails, the edition simply shows without them.
+ */
+async function loadFollowUps(ids: string[]): Promise<FollowUpRow[]> {
+  if (ids.length === 0) return []
+  const list = ids.join(',')
+  try {
+    return await rest<FollowUpRow[]>(`public_followups?select=*&or=(earlier_story_id.in.(${list}),later_story_id.in.(${list}))`)
+  } catch {
+    return []
+  }
+}
+
 const storyFromRow = (r: StoryRow): PublicStory => ({
   id: r.id,
   position: r.position,
@@ -153,7 +168,7 @@ async function loadEdition(filter: string): Promise<PublicEdition | null> {
     date: edition.edition_date,
     publishedAt: edition.published_at,
     isDemo: false,
-    stories: stories.map(storyFromRow),
+    stories: attachFollowUps(stories.map(storyFromRow), await loadFollowUps(stories.map((s) => s.id))),
   }
 }
 

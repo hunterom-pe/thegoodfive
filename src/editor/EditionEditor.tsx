@@ -107,6 +107,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
             <StoryReviewCard
               key={story.id}
               story={story}
+              editionDate={edition.date}
               locked={published}
               busy={busy}
               isFirst={i === 0}
@@ -141,6 +142,7 @@ function Editor({ edition, reload }: { edition: EditorEdition; reload: () => voi
             <StoryReviewCard
               key={story.id}
               story={story}
+              editionDate={edition.date}
               locked={published}
               busy={busy}
               actions={{

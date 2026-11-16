@@ -75,6 +75,35 @@ function PhotoCredit({ story }: { story: PublicStory }) {
   )
 }
 
+/**
+ * "An update to…" / "What happened next?": quiet links between stories an editor has connected and approved.
+ * Context only: they point to the other story in its own dated edition and never add a story to this one.
+ */
+export function FollowUpLinks({ story }: { story: PublicStory }) {
+  if (!story.followUps?.length) return null
+  return (
+    <div className="mt-4 space-y-3">
+      {story.followUps.map((f) => (
+        <div key={f.id} className="border-l-2 border-sage pl-3">
+          <p className="label text-sage-deep">{f.kind === 'update-to' ? 'An update to' : 'What happened next?'}</p>
+          <p className="mt-1 text-[0.9375rem] leading-snug">
+            <Link to={`/edition/${f.date}#story-${f.position}`} className="link-quiet font-display text-[1.0625rem] text-forest">
+              {f.headline}
+            </Link>{' '}
+            <span className="whitespace-nowrap text-[0.8125rem] text-ink/60">· {formatShort(f.date)}</span>
+          </p>
+          <p className="mt-1 text-[0.8125rem] leading-relaxed text-ink/70">
+            {f.explanation}{' '}
+            <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" className="link-quiet font-semibold text-forest">
+              Source<span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** Attribution and the way out to the original reporting. */
 export function StorySource({ story, isDemo, className = '' }: { story: PublicStory; isDemo: boolean; className?: string }) {
   const linkClass = 'group mt-1 inline-flex min-h-11 items-center gap-3 text-[0.9375rem] font-semibold text-forest'
@@ -111,6 +140,7 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
           {chip}
         </a>
       )}
+      <FollowUpLinks story={story} />
       <StoryActions story={story} />
     </div>
   )

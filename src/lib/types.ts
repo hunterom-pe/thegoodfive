@@ -24,6 +24,8 @@ export interface PublicStory {
   imageSourceUrl: string | null
   /** The photographer's (or publisher's) page, for attribution links. */
   imageCreditUrl: string | null
+  /** Approved "What happened next?" links (context only: never extra stories). */
+  followUps?: import('./followups').FollowUp[]
 }
 
 export interface PublicEdition {
