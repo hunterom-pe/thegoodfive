@@ -111,6 +111,9 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
   // Alerts that cannot be delivered are remembered and stored with the run, so nobody has to guess whether they were told.
   const tracked = trackedNotifier(webhookNotifier(c0.alertWebhook))
   const alertNote = () => (tracked.failures.length ? { alertFailures: [...tracked.failures] } : {})
+  const startedAt = Date.now()
+  const job = new AbortController()
+  let jobTimer: ReturnType<typeof setTimeout> | undefined
   try {
     const c = env()
     const { data: runRow, error: runError } = await db.from('discovery_runs').select('trigger').eq('id', runId).single()
@@ -125,25 +128,29 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     const recentUrls = (recent ?? []).map((r) => r.source_url as string)
     const library = await loadLibrary(db)
 
-    // Netlify stops background functions at 15 minutes with no word. Stop ourselves first, so the run is
-    // recorded as failed with a clear reason and the editor's page (which waits 16 minutes) hears about it.
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`The run took longer than ${Math.round(c.runDeadlineMs / 60_000)} minutes and was stopped. Try again, or use a faster AI model.`)), c.runDeadlineMs)
-    })
-    const result = await Promise.race([deadline, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, noticeKey: c.unsplashKey || undefined, library, today: date, appName: c.appName, log } })]).finally(() => clearTimeout(timer))
+    // Netlify stops background functions at 15 minutes with no word. One clock covers the whole job (finding,
+    // writing, saving and the draft-time claim checks): it expires `reserve` before the limit, so the outcome can
+    // still be recorded and the alert sent. Expiry also cancels the unfinished AI calls and stages.
+    const total = c.runDeadlineMs
+    const reserve = Math.min(FINISH_RESERVE_MS, Math.floor(total / 10))
+    const limit = startedAt + total - reserve
+    jobTimer = setTimeout(() => job.abort(new Error(`The run took longer than ${Math.round(total / 60_000)} minutes and was stopped. Try again, or use a faster AI model.`)), Math.max(0, limit - Date.now()))
+    const result = await untilAborted(job.signal, runPipeline({ ai: openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: c.aiTimeoutSeconds, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : undefined, log: console.log }), today: date, recentUrls, log, signal: job.signal, extraTrustedDomains: c.extraTrusted, images: { unsplashKey: personPresent ? c.unsplashKey || undefined : undefined, noticeKey: c.unsplashKey || undefined, library, today: date, appName: c.appName, log } }))
     Object.assign(stats, result.stats)
     if (result.stories.length === 0) {
       await tracked.notify(`Draft generation for ${date} found no suitable stories. Nothing was saved.`)
       return await finish(db, runId, 'skipped', { ...stats, ...alertNote() }, 'No suitable stories were found. Nothing was saved.', tracked.notify)
     }
 
-    const { data: editionId, error } = await db.rpc('create_draft_edition', { p_date: date, p_stories: result.stories })
+    const { data: editionId, error } = await untilAborted(job.signal, Promise.resolve(db.rpc('create_draft_edition', { p_date: date, p_stories: result.stories })))
     if (error) throw new Error(error.message)
     if (!editionId) return await finish(db, runId, 'skipped', { ...stats, ...alertNote() }, 'The edition changed while generating, so nothing was saved.', tracked.notify)
-    await recordLibraryUse(db, editionId as string, date, result.stories, log)
+    // The draft is saved. What follows is best effort within the same clock: running out of time here must not
+    // turn a saved draft into a failed run. Unchecked stories are simply checked at 7:00 AM.
+    await untilAborted(job.signal, recordLibraryUse(db, editionId as string, date, result.stories, log)).catch((e) => log(`Photo use not recorded: ${e instanceof Error ? e.message : e}`))
     // Check every story's claims now, while there is time, so 7:00 AM does not depend on the AI being quick then.
-    Object.assign(stats, { claimChecks: await storeDraftClaimChecks(db, date, deps.verify ?? draftClaimVerifier(), log, { gapMs: env().claimCheckGapMs }) })
+    const claimBudget = Math.min(CLAIM_CHECK_BUDGET_MS, limit - Date.now())
+    Object.assign(stats, { claimChecks: await storeDraftClaimChecks(db, date, deps.verify ?? draftClaimVerifier(), log, { gapMs: env().claimCheckGapMs, budgetMs: claimBudget, signal: job.signal }) })
     // Photos are expected every day: say so loudly when a story will run without one.
     const bare = result.stories.filter((s) => s.role === 'primary' && !s.image_rights_confirmed).length
     if (bare > 0) await tracked.notify(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
@@ -153,7 +160,24 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     log(`Run failed: ${message}`)
     await tracked.notify(`Draft generation for ${date} failed: ${message.slice(0, 300)}`)
     await finish(db, runId, 'failed', { ...stats, ...alertNote() }, message.slice(0, 500), tracked.notify)
+  } finally {
+    clearTimeout(jobTimer)
   }
+}
+
+/** Time kept back from the whole-job limit for recording the outcome and sending the alert. */
+export const FINISH_RESERVE_MS = 60_000
+/** The most the draft-time claim checks may take, whatever time is left. */
+const CLAIM_CHECK_BUDGET_MS = 4 * 60_000
+
+/** Settle with the work, or reject as soon as the signal fires (the work is left to be cancelled by its own signal). */
+function untilAborted<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal.aborted) return void reject(signal.reason)
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /** Hand the slow work to the background function, which may run for minutes. */
@@ -301,8 +325,12 @@ export function parseStoredCheck(raw: unknown): StoredClaimCheck | null {
  * of the text it read, for the 7:00 AM publisher to reuse. Slow and patient on purpose (a few at a time, generous
  * timeouts and retries). Never throws and never blocks the draft: a failure only means 7:00 AM checks that story.
  */
-export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number; budgetMs?: number } = {}): Promise<{ checked: number; stored: number }> {
+export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number; budgetMs?: number; signal?: AbortSignal } = {}): Promise<{ checked: number; stored: number }> {
   if (!verify) return { checked: 0, stored: 0 }
+  if (options.budgetMs !== undefined && options.budgetMs <= 0) {
+    log('Claim checks skipped: no time left in this run. They will be made at publish time.')
+    return { checked: 0, stored: 0 }
+  }
   let edition: StoredEdition | null = null
   try {
     edition = await supabasePublishStore(db).loadEdition(date)
@@ -320,12 +348,16 @@ export async function storeDraftClaimChecks(db: SupabaseClient, date: string, ve
   // platform kills it (it has 15 minutes in all, and the pipeline has already used some). Unchecked stories are
   // simply checked at 7:00 AM.
   const deadline = new AbortController()
-  const timer = setTimeout(() => deadline.abort(new Error('The draft-time claim checks ran out of time.')), options.budgetMs ?? 4 * 60_000)
+  const timer = setTimeout(() => deadline.abort(new Error('The draft-time claim checks ran out of time.')), options.budgetMs ?? CLAIM_CHECK_BUDGET_MS)
+  // The whole job's clock stops these too, even if its budget has not run out.
+  options.signal?.addEventListener('abort', () => deadline.abort(options.signal?.reason), { once: true })
   await eachLimited(candidates, 1, async (s) => {
     if (deadline.signal.aborted) return
-    if (candidates.indexOf(s) > 0 && gap > 0) await new Promise((r) => setTimeout(r, gap))
+    if (candidates.indexOf(s) > 0 && gap > 0) await untilAborted(deadline.signal, new Promise((r) => setTimeout(r, gap))).catch(() => {})
     if (deadline.signal.aborted) return
-    const v = await verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }, deadline.signal).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
+    const v = await untilAborted(deadline.signal, Promise.resolve(verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }, deadline.signal))).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
+    // A check cut off by the time limit says nothing about the story: store nothing, so it is checked at 7:00 AM.
+    if (deadline.signal.aborted) return
     const record: StoredClaimCheck = { ...v, hash: contentHash(s), checkedAt: new Date().toISOString() }
     const { error } = await db.from('stories').update({ claim_check: record }).eq('id', s.id)
     if (error) log(`Could not store the claim check for "${s.headline.slice(0, 40)}": ${error.message}`)

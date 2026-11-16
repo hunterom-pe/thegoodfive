@@ -29,6 +29,8 @@ export interface PipelineOptions {
   extraTrustedDomains?: string
   /** Photo settings. Without an Unsplash key only the article's own image is offered, unapproved. */
   images?: ImageOptions
+  /** Stops the run: AI calls are abandoned and no further stage starts once this fires. */
+  signal?: AbortSignal
 }
 
 export interface PipelineResult {
@@ -104,6 +106,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const log = options.log ?? (() => {})
   const now = (options.now ?? new Date()).getTime()
   const stats: Record<string, number> = {}
+  const signal = options.signal
+  const stop = () => signal?.throwIfAborted()
+  // Every AI request carries the run's signal, so an expired run abandons the call instead of waiting on it.
+  const ai: AiClient = signal ? { json: (request) => options.ai.json({ ...request, signal: request.signal ? AbortSignal.any([signal, request.signal]) : signal }) } : options.ai
 
   // 1. Discover and narrow.
   const raw = await (options.discover ?? discoverAll)(log)
@@ -121,7 +127,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // 2. Screen on headline and excerpt (one AI call).
   log('Screening candidates with AI…')
   const t0 = Date.now()
-  const evaluations = await screen(options.ai, pool, options.today)
+  stop()
+  const evaluations = await screen(ai, pool, options.today)
   log(`Screening took ${Math.round((Date.now() - t0) / 1000)}s`)
   const ranked = rank(pool, evaluations, now, SHORTLIST_SIZE)
   stats.qualified = evaluations.filter((e) => e.isGoodNews).length
@@ -130,7 +137,9 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   // 3. Read the shortlisted stories (robots.txt respected) and drop any we can't support.
   const fetchMaterial = options.fetchMaterial ?? fetchArticle
+  stop()
   const withMaterial = await mapLimit(ranked, 5, async (r): Promise<Shortlisted> => {
+    stop()
     const article = await fetchMaterial(r.candidate.url)
     return { ...r, material: materialFor(r.candidate, article), images: article?.images ?? [] }
   })
@@ -142,7 +151,8 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // 4. Choose and write (one AI call), then verify the writing against the source text.
   log('Writing the edition with AI…')
   const t1 = Date.now()
-  const written = await write(options.ai, shortlist, options.today)
+  stop()
+  const written = await write(ai, shortlist, options.today)
   log(`Writing took ${Math.round((Date.now() - t1) / 1000)}s`)
   const drafts = assemble(written, shortlist, log, { maxBackups: 5 })
   // Deterministic fact-checking against the retrieved source text. Failures are rejected, never scored.
@@ -152,6 +162,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   for (const s of gated.stories.filter((x) => x.role === 'rejected')) log(`Rejected "${s.headline.slice(0, 50)}": ${s.rejected_reason}`)
   const drafted = gated.stories
   const sources = new Map(shortlist.map((s) => [s.candidate.url, { candidate: s.candidate, hints: s.images ?? [] }]))
+  stop()
   const stories = await attachImages(drafted, sources, imagePlans(written, shortlist), { log, ...options.images })
   stats.primary = stories.filter((s) => s.role === 'primary').length
   stats.backup = stories.filter((s) => s.role === 'backup').length
