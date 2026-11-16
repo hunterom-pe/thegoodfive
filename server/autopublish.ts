@@ -19,7 +19,27 @@ export interface StoredStory {
   aiRationale: string | null
   /** Will readers see an approved photo? Unknown (undefined) in older callers. */
   hasPublicPhoto?: boolean
+  /** The claim check run when the draft was written (4:00 AM), with the fingerprint of the text it read. */
+  claimCheck?: StoredClaimCheck | null
 }
+
+/** A claim check stored with a story. Reused at publication only while `hash` still matches the story's text. */
+export interface StoredClaimCheck extends Verification {
+  hash: string
+  checkedAt: string
+}
+
+/** Run `task` over `items`, at most `limit` at a time. */
+export async function eachLimited<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) await task(items[next++])
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
+/** How many claim checks run at once. Gemini answers bursts with "503 overloaded"; a few at a time is reliable. */
+export const VERIFY_CONCURRENCY = 3
 
 export interface StoredEdition {
   id: string
@@ -226,13 +246,34 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
     // five can be confirmed, or the check itself could not run, nothing is published and an editor is asked.
     const verdicts = new Map<string, Verification>()
     const unavailableCheck: Verification = { verdict: 'inconclusive', unavailable: true, issues: ['No claim verification is configured, so this story cannot be confirmed automatically.'] }
+    const timedOut: Verification = { verdict: 'inconclusive', unavailable: true, issues: ['The claim check timed out.'] }
     const toCheck = candidates.filter((c) => c.result.ok)
-    const budget = o.verifyBudgetMs ?? 20_000
-    const checked = await Promise.race([
-      Promise.all(toCheck.map(async (c) => [c.item.id, o.verify ? await o.verify({ headline: c.item.headline, summary: c.item.summary, material: c.item.sourceMaterial ?? '' }) : unavailableCheck] as const)),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
-    ])
-    for (const c of toCheck) verdicts.set(c.item.id, checked?.find(([id]) => id === c.item.id)?.[1] ?? { verdict: 'inconclusive', unavailable: true, issues: ['The claim check timed out.'] })
+    // The draft run (4:00 AM, no time pressure) already checked most stories: reuse a stored check whenever it was
+    // made on exactly the text being published (same fingerprint) and actually ran. Anything else is checked now.
+    const fresh = toCheck.filter((c) => {
+      const stored = c.item.claimCheck
+      if (stored && !stored.unavailable && stored.hash === checkedHash.get(c.item.id)) {
+        verdicts.set(c.item.id, { verdict: stored.verdict, issues: stored.issues })
+        return false
+      }
+      return true
+    })
+    if (fresh.length) {
+      // A hard deadline for the checks still needed (the scheduled function has about 30 seconds in all). When it
+      // passes, unfinished requests are cancelled, so the function ends instead of hanging; finished results are kept.
+      const deadline = new AbortController()
+      const timer = setTimeout(() => deadline.abort(new Error('The claim check timed out.')), o.verifyBudgetMs ?? 20_000)
+      const expired = new Promise<Verification>((resolve) => deadline.signal.addEventListener('abort', () => resolve(timedOut), { once: true }))
+      await eachLimited(fresh, VERIFY_CONCURRENCY, async (c) => {
+        if (deadline.signal.aborted) return void verdicts.set(c.item.id, timedOut)
+        if (!o.verify) return void verdicts.set(c.item.id, unavailableCheck)
+        const input = { headline: c.item.headline, summary: c.item.summary, material: c.item.sourceMaterial ?? '' }
+        const v = await Promise.race([o.verify(input, deadline.signal).catch((): Verification => timedOut), expired])
+        verdicts.set(c.item.id, deadline.signal.aborted && v.unavailable ? timedOut : v)
+      })
+      clearTimeout(timer)
+      if (!deadline.signal.aborted) deadline.abort(new Error('done')) // release anything still listening
+    }
     const notConfirmed: NonNullable<PublishRunRecord['details']['needsReview']> = []
     for (const c of toCheck) {
       const v = verdicts.get(c.item.id)!

@@ -117,3 +117,44 @@ describe('checking a key with Google’s native API', () => {
     expect(calls.every((c) => c.url.startsWith('https://generativelanguage.googleapis.com/') && c.header === KEY)).toBe(true)
   })
 })
+
+describe('retries of a busy provider', () => {
+  const real = globalThis.fetch
+  const request = { system: 's', user: 'u', name: 'n', schema: { type: 'object' }, maxTokens: 10 }
+  const busy = () => new Response('{"error":{"code":503,"message":"This model is currently overloaded."}}', { status: 503 })
+  const fine = () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }] }), { status: 200 })
+  it('retries exactly as many times as there are delays: [1s] means one retry, never a fallback 60-second wait', async () => {
+    const calls: number[] = []
+    globalThis.fetch = (async () => (calls.push(Date.now()), busy())) as typeof fetch
+    try {
+      const started = Date.now()
+      await expect(openAiClient(KEY, 'm', undefined, { retryDelaysMs: [5] }).json(request)).rejects.toThrow(/503/)
+      expect(calls).toHaveLength(2)
+      expect(Date.now() - started).toBeLessThan(2000)
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+  it('recovers when the provider answers on a retry', async () => {
+    let n = 0
+    globalThis.fetch = (async () => (++n === 1 ? busy() : fine())) as typeof fetch
+    try {
+      expect(await openAiClient(KEY, 'm', undefined, { retryDelaysMs: [5] }).json(request)).toEqual({ ok: true })
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+  it('stops waiting the moment the caller gives up', async () => {
+    globalThis.fetch = (async () => busy()) as typeof fetch
+    const controller = new AbortController()
+    try {
+      const pending = openAiClient(KEY, 'm', undefined, { retryDelaysMs: [60_000] }).json({ ...request, signal: controller.signal })
+      setTimeout(() => controller.abort(new Error('deadline')), 20)
+      const started = Date.now()
+      await expect(pending).rejects.toThrow(/deadline/)
+      expect(Date.now() - started).toBeLessThan(1000)
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+})

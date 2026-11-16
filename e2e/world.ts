@@ -129,6 +129,8 @@ export class World {
   /** Handler for the background function, installed by the test (it runs the real executeRun). */
   /** Called when the claim-by-claim check is asked a question: lets a test edit a story "while the check is running". */
   onClaimCheck?: () => void
+  /** How many claim-check questions the fake model has been asked. */
+  claimCheckCalls = 0
   background?: (req: { secret: string | null; body: { runId?: string; date?: string } }) => Promise<number>
   private real?: typeof fetch
 
@@ -141,7 +143,7 @@ export class World {
   }
   reset(over: Partial<WorldState> = {}) {
     this.state = { goodTrusted: 8, goodUntrusted: 0, bad: 10, feedsDown: false, ai: 'ok', unsplash: 'ok', gone: new Set(), aiDelayMs: 0, claimCheck: 'ok', webhook: 'ok', ...over }
-    this.log = []; this.blocked = []; this.alerts = []
+    this.log = []; this.blocked = []; this.alerts = []; this.claimCheckCalls = 0
   }
   calls = (needle: string) => this.log.filter((u) => u.includes(needle)).length
 
@@ -159,7 +161,10 @@ export class World {
       if (this.state.ai === 'hang') return this.hang(init)
       if (this.state.ai === 'error500') return text('{"error":"upstream failure"}', 500, 'application/json')
       const parsed = JSON.parse(String(init?.body))
-      if (parsed.response_format?.json_schema?.name === 'claim_check') this.onClaimCheck?.()
+      if (parsed.response_format?.json_schema?.name === 'claim_check') {
+        this.claimCheckCalls++
+        this.onClaimCheck?.()
+      }
       if (this.state.claimCheck === 'down' && parsed.response_format?.json_schema?.name === 'claim_check') return text('{"error":"claim check unavailable"}', 500, 'application/json')
       const content = JSON.stringify(fakeModel(parsed, this.state.ai, this.state.claimCheck))
       return text(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content } }] }), 200, 'application/json')

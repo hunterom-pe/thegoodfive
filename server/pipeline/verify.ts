@@ -32,7 +32,8 @@ export interface VerifyInput {
   material: string
 }
 
-export type ClaimVerifier = (story: VerifyInput) => Promise<Verification>
+/** `signal` abandons the check (the result is then "unavailable"). */
+export type ClaimVerifier = (story: VerifyInput, signal?: AbortSignal) => Promise<Verification>
 
 /** One clause, with the stable id the verifier must answer for. */
 export interface Clause {
@@ -188,7 +189,7 @@ export function judge(raw: Raw | null | undefined, input: VerifyInput): Verifica
 
 /** A verifier backed by the same AI client the pipeline uses. Any failure is "inconclusive", never "verified". */
 export function aiClaimVerifier(ai: AiClient): ClaimVerifier {
-  return async (input) => {
+  return async (input, signal) => {
     try {
       const listed = statementsOf(input).map((s) => `[${s.id}] ${s.text}\n${s.clauses.map((c) => `  [${c.id}] ${c.text}`).join('\n')}`).join('\n')
       const raw = await ai.json<Raw>({
@@ -197,6 +198,7 @@ export function aiClaimVerifier(ai: AiClient): ClaimVerifier {
         name: 'claim_check',
         schema: SCHEMA,
         maxTokens: 2400,
+        signal,
       })
       return judge(raw, input)
     } catch (e) {

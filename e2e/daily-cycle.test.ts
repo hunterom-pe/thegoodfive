@@ -12,7 +12,7 @@ const YESTERDAY = new Date(Date.parse(`${TODAY}T12:00:00Z`) - 86_400_000).toISOS
 
 const ENV = {
   SUPABASE_URL: 'https://e2e.supabase.test', SUPABASE_SERVICE_ROLE_KEY: 'e2e-service-key', OPENAI_API_KEY: 'e2e-ai-key', OPENAI_BASE_URL: 'https://api.fake-llm.test/v1', OPENAI_MODEL: 'fake-model',
-  GENERATION_SECRET: 'e2e-secret', URL: 'https://e2e.site', AUTO_PUBLISH_ENABLED: 'true', ALERT_WEBHOOK_URL: 'https://hooks.example.com/alert', AI_RETRY_DELAYS_MS: '1,1,1', GDELT_PAUSE_MS: '1', EDITION_TIMEZONE: 'America/Phoenix',
+  GENERATION_SECRET: 'e2e-secret', URL: 'https://e2e.site', AUTO_PUBLISH_ENABLED: 'true', ALERT_WEBHOOK_URL: 'https://hooks.example.com/alert', AI_RETRY_DELAYS_MS: '1,1,1', CLAIM_CHECK_GAP_MS: '0', GDELT_PAUSE_MS: '1', EDITION_TIMEZONE: 'America/Phoenix',
   // Present on purpose: unattended runs must IGNORE it (Unsplash's terms ask for non-automated use).
   UNSPLASH_ACCESS_KEY: 'e2e-unsplash-key',
 } as Record<string, string>
@@ -101,11 +101,18 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(primaries.map((s) => s.headline).join(' ')).not.toMatch(/Bombing|Shooting|dead|Tragedy/i)
     // Unsplash's terms ask for non-automated use: an unattended run must not call it, even with a key present.
     expect(world.calls('api.unsplash.com')).toBe(0)
-    expect(world.calls('api.fake-llm.test')).toBe(2) // exactly two AI calls: cost stays low
+    // Two calls to find and write the stories, then one claim check per candidate, done now while there is time.
+    const candidates = storiesOf('primary').length + storiesOf('backup').length
+    expect(world.calls('api.fake-llm.test')).toBe(2 + candidates)
+    expect(world.claimCheckCalls).toBe(candidates)
+    const checked = pg.query(`select s.claim_check->>'verdict' as verdict, s.claim_check->>'hash' = public.story_content_hash_v2(s) as fresh from public.stories s join public.editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.role <> 'rejected'`) as { verdict: string; fresh: boolean }[]
+    expect(checked.every((c) => c.verdict === 'verified' && c.fresh)).toBe(true)
+    world.claimCheckCalls = 0
 
-    // 7:00 AM: the scheduled publisher verifies and publishes.
+    // 7:00 AM: the scheduled publisher verifies and publishes, reusing the checks made at 4:00 AM.
     const outcome = await scheduledPublish('schedule', { db })
     expect(outcome?.status, outcome?.reason).toBe('published')
+    expect(world.claimCheckCalls).toBe(0)
     expect(todayRow()).toMatchObject({ status: 'published', automatic: true, stamped: true })
 
     // The public site's data: today first, then the previous edition; five stories in order; exactly what was drafted.
@@ -328,8 +335,19 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
   })
 
   // ── claim verification before publishing ─────────────────────────────
-  it('if the claim check is unavailable at 7:00 AM, the edition is held for an editor and nothing is published', async () => {
+  it('the 16 November case: the AI is overloaded at 7:00 AM, but the checks made at 4:00 AM still let the edition publish', async () => {
     seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    world.reset({ claimCheck: 'down' })
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status, out?.reason).toBe('published')
+    expect(world.claimCheckCalls).toBe(0)
+  })
+
+  it('if the claim check is unavailable both at 4:00 and at 7:00 AM, the edition is held for an editor and nothing is published', async () => {
+    seedPublished(YESTERDAY)
+    world.reset({ claimCheck: 'down' })
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
     world.reset({ claimCheck: 'down' })
@@ -343,6 +361,7 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
 
   it('a story the claim check cannot confirm is replaced by a confirmed backup, and the edition still publishes', async () => {
     seedPublished(YESTERDAY)
+    world.reset({ claimCheck: 'unsure' })
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
     const drafted = (storiesOf('primary') as { headline: string }[]).map((s) => s.headline)
@@ -357,6 +376,7 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
 
   it('if every story’s claims conflict with its source, nothing is published', async () => {
     seedPublished(YESTERDAY)
+    world.reset({ claimCheck: 'conflict' })
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
     world.reset({ claimCheck: 'conflict' })
@@ -433,6 +453,7 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     seedPublished(YESTERDAY)
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
+    pg.exec(`update public.stories set claim_check = null where edition_id = (select id from public.editions where edition_date = '${TODAY}')`) // as if the 4:00 AM checks never ran: 7:00 AM checks live
     let edited = false
     world.onClaimCheck = () => {
       if (edited) return
@@ -456,6 +477,7 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     seedPublished(YESTERDAY)
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
+    pg.exec(`update public.stories set claim_check = null where edition_id = (select id from public.editions where edition_date = '${TODAY}')`) // as if the 4:00 AM checks never ran: 7:00 AM checks live
     let edited = false
     world.onClaimCheck = () => {
       if (edited) return
@@ -553,6 +575,7 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
 
   it('a failing alert webhook is recorded with the run, and the run still completes', async () => {
     seedPublished(YESTERDAY)
+    world.reset({ claimCheck: 'down' })
     await scheduledDraft('schedule', { db })
     await waitForGeneration()
     world.reset({ claimCheck: 'down', webhook: 'http500' })

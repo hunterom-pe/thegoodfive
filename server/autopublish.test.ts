@@ -1,10 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { SCHEDULE } from '../src/lib/schedule'
-import { contentHash, epochSeconds, runAutoPublish, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
+import { contentHash, epochSeconds, runAutoPublish, VERIFY_CONCURRENCY, type StoredClaimCheck, type PublishDecision, type PublishRunRecord, type PublishStore, type SourceChecker, type StoredEdition } from './autopublish'
 import { backup, DATE, edition, fiveGood, NOW, story } from './fixtures'
 import { trackedNotifier, webhookNotifier } from './alerts'
-import type { ClaimVerifier } from './pipeline/verify'
+import type { ClaimVerifier, Verification } from './pipeline/verify'
 import { evaluateStory } from './pipeline/gates'
 
 /** An in-memory stand-in for the database that obeys the same rules as auto_publish_edition(). */
@@ -501,3 +501,62 @@ describe('photo coverage', () => {
     expect(out.record.details.warnings?.filter((w) => /no approved photo/.test(w))).toHaveLength(1)
   })
 })
+
+describe('claim checks under real-world conditions (the 16 November failure)', () => {
+  const ok: Verification = { verdict: 'verified', issues: [] }
+  it('keeps every check that finished: one slow story times out alone, and a confirmed backup takes its place', async () => {
+    const slowOne = story(2)
+    const verify: ClaimVerifier = ({ headline }, signal) =>
+      headline === slowOne.headline ? new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))) : Promise.resolve(ok)
+    const store = new MemoryStore(edition([...fiveGood(), backup(5)]))
+    const out = await go(store, { verify, verifyBudgetMs: 50 })
+    expect(out.status, out.reason).toBe('published')
+    expect(store.published[0].primary).not.toContain('s2')
+    expect(store.published[0].primary).toContain('b5')
+    expect(out.record.details.needsReview).toEqual([expect.objectContaining({ verdict: 'unavailable', issues: ['The claim check timed out.'] })])
+  })
+  it('cancels unfinished checks at the deadline, so the job ends instead of hanging', async () => {
+    const signals: AbortSignal[] = []
+    const verify: ClaimVerifier = (_s, signal) => {
+      signals.push(signal!)
+      return new Promise(() => {}) // never answers, and ignores the signal: the deadline must still end the run
+    }
+    const started = Date.now()
+    const out = await go(new MemoryStore(edition(fiveGood())), { verify, verifyBudgetMs: 40 })
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(out.status).toBe('failed')
+    expect(signals.length).toBeGreaterThan(0)
+    expect(signals.every((s) => s.aborted)).toBe(true)
+  })
+  it('runs at most a few checks at once (bursts are what the provider refuses)', async () => {
+    let inFlight = 0
+    let most = 0
+    const verify: ClaimVerifier = async () => {
+      most = Math.max(most, ++inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      return ok
+    }
+    expect((await go(new MemoryStore(edition([...fiveGood(), backup(5), backup(6), backup(7)])), { verify })).status).toBe('published')
+    expect(most).toBeLessThanOrEqual(VERIFY_CONCURRENCY)
+  })
+  it('reuses a check stored at draft time when the text is unchanged, and never when it changed or the check did not run', async () => {
+    const stories = fiveGood().map((s) => ({ ...s, claimCheck: { verdict: 'verified', issues: [], hash: contentHash(s), checkedAt: NOW.toISOString() } as StoredClaimCheck }))
+    stories[1] = { ...stories[1], summary: stories[1].summary + ' Edited after the check.' } // fingerprint no longer matches
+    stories[3] = { ...stories[3], claimCheck: { ...stories[3].claimCheck!, verdict: 'inconclusive', unavailable: true, issues: ['timed out'] } }
+    const verify = vi.fn(async () => ok)
+    const out = await go(new MemoryStore(edition(stories)), { verify })
+    expect(out.status).toBe('published')
+    expect(verify).toHaveBeenCalledTimes(2) // only the edited story and the one whose stored check never ran
+  })
+  it('a stored conflict is honoured without asking again', async () => {
+    const stories = fiveGood().map((s) => ({ ...s, claimCheck: { verdict: 'verified', issues: [], hash: contentHash(s), checkedAt: '' } as StoredClaimCheck }))
+    stories[0] = { ...stories[0], claimCheck: { verdict: 'contradicted', issues: ['Conflicts with the source: S1.1'], hash: contentHash(stories[0]), checkedAt: '' } }
+    const verify = vi.fn(async () => ok)
+    const out = await go(new MemoryStore(edition([...stories, backup(5)])), { verify })
+    expect(out.status).toBe('published')
+    expect(store_primary(out)).not.toContain(stories[0].headline)
+    expect(verify).toHaveBeenCalledTimes(1) // just the backup
+  })
+})
+const store_primary = (out: Awaited<ReturnType<typeof runAutoPublish>>) => out.record.details.accepted?.map((a) => a.headline) ?? []

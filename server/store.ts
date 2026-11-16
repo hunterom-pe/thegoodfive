@@ -3,7 +3,7 @@ import { openAiClient } from './pipeline/ai.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
 import { trackedNotifier, webhookNotifier } from './alerts.ts'
 import { aiConfig } from './pipeline/gemini.ts'
-import { aiClaimVerifier, type ClaimVerifier } from './pipeline/verify.ts'
+import { aiClaimVerifier, type ClaimVerifier, type Verification } from './pipeline/verify.ts'
 import type { LibraryPhoto } from './pipeline/library.ts'
 
 /** Server-side configuration. None of these are ever sent to a browser. */
@@ -28,6 +28,8 @@ export function env() {
     alertWebhook: e.ALERT_WEBHOOK_URL || '',
     extraTrusted: e.EXTRA_TRUSTED_DOMAINS || '',
     runDeadlineMs: Number(e.RUN_DEADLINE_MS) || RUN_DEADLINE_MS,
+    /** Pause between claim checks at draft time (CLAIM_CHECK_GAP_MS; default 4.5s, about 13 a minute at most). */
+    claimCheckGapMs: Number.isFinite(Number(e.CLAIM_CHECK_GAP_MS)) && e.CLAIM_CHECK_GAP_MS !== undefined && e.CLAIM_CHECK_GAP_MS !== '' ? Math.max(0, Number(e.CLAIM_CHECK_GAP_MS)) : 4_500,
     aiRetryDelays: (e.AI_RETRY_DELAYS_MS ?? '').split(',').filter((x) => x.trim() !== '').map((x) => Number(x)).filter((n) => Number.isFinite(n) && n >= 0),
     maxRunsPerDay: Number(e.MAX_RUNS_PER_DAY || 4),
     siteUrl: (e.URL || e.SITE_URL || 'http://localhost:8888').replace(/\/$/, ''),
@@ -103,7 +105,7 @@ async function finish(db: SupabaseClient, runId: string, status: 'succeeded' | '
 }
 
 /** Run the whole pipeline and store the result as an unpublished draft. Never throws; the outcome is recorded on the run. */
-export async function executeRun(db: SupabaseClient, runId: string, date: string, log: (line: string) => void = console.log): Promise<void> {
+export async function executeRun(db: SupabaseClient, runId: string, date: string, log: (line: string) => void = console.log, deps: { verify?: ClaimVerifier } = {}): Promise<void> {
   const stats: Record<string, unknown> = {}
   const c0 = env()
   // Alerts that cannot be delivered are remembered and stored with the run, so nobody has to guess whether they were told.
@@ -140,6 +142,8 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     if (error) throw new Error(error.message)
     if (!editionId) return await finish(db, runId, 'skipped', { ...stats, ...alertNote() }, 'The edition changed while generating, so nothing was saved.', tracked.notify)
     await recordLibraryUse(db, editionId as string, date, result.stories, log)
+    // Check every story's claims now, while there is time, so 7:00 AM does not depend on the AI being quick then.
+    Object.assign(stats, { claimChecks: await storeDraftClaimChecks(db, date, deps.verify ?? draftClaimVerifier(), log, { gapMs: env().claimCheckGapMs }) })
     // Photos are expected every day: say so loudly when a story will run without one.
     const bare = result.stories.filter((s) => s.role === 'primary' && !s.image_rights_confirmed).length
     if (bare > 0) await tracked.notify(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
@@ -183,16 +187,17 @@ export async function authenticateEditor(db: SupabaseClient, authorization: stri
 }
 
 // ── Publishing storage (Supabase) ──────────────────────────────────────────
-import type { PublishDecision, PublishRunRecord, PublishStore, StoredEdition, StoredStory } from './autopublish.ts'
+import { contentHash, eachLimited, type PublishDecision, type PublishRunRecord, type PublishStore, type StoredClaimCheck, type StoredEdition, type StoredStory } from './autopublish.ts'
 
 export function supabasePublishStore(db: SupabaseClient): PublishStore {
   return {
     async loadEdition(date) {
-      const { data, error } = await db
-        .from('editions')
-        .select('id, edition_date, status, stories(id, role, position, headline, summary, category, source_name, source_url, source_published_at, source_material, ai_rationale, image_url, image_rights_confirmed, image_source, image_editor_approved)')
-        .eq('edition_date', date)
-        .maybeSingle()
+      const columns = 'id, role, position, headline, summary, category, source_name, source_url, source_published_at, source_material, ai_rationale, image_url, image_rights_confirmed, image_source, image_editor_approved'
+      const read = (withChecks: boolean) =>
+        db.from('editions').select(`id, edition_date, status, stories(${columns}${withChecks ? ', claim_check' : ''})`).eq('edition_date', date).maybeSingle()
+      let { data, error } = await read(true)
+      // Before migration 20261120000000 the column does not exist: read without it (every story is then checked now).
+      if (error && /claim_check/.test(error.message)) ({ data, error } = await read(false))
       if (error) throw new Error(`Could not read the edition: ${error.message}`)
       if (!data) return null
       const rows = data.stories as Record<string, unknown>[]
@@ -207,6 +212,7 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
           sourcePublishedAt: (r.source_published_at as string | null) ?? null, sourceMaterial: (r.source_material as string | null) ?? null,
           aiRationale: (r.ai_rationale as string | null) ?? null,
           hasPublicPhoto: Boolean(r.image_url && r.image_rights_confirmed && (r.image_source !== 'unsplash' || r.image_editor_approved)),
+          claimCheck: parseStoredCheck(r.claim_check),
         })),
       }
     },
@@ -241,7 +247,7 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
 export function claimVerifier(): ClaimVerifier | undefined {
   const c = env()
   if (!c.aiKey) return undefined
-  return aiClaimVerifier(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 18, retryDelaysMs: [1_000] }))
+  return aiClaimVerifier(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 15, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays.slice(0, 1) : [1_500] }))
 }
 
 const photoFrom = (r: Record<string, unknown>): LibraryPhoto => ({
@@ -275,4 +281,56 @@ async function recordLibraryUse(db: SupabaseClient, editionId: string, date: str
     const { error: useError } = readError ? { error: readError } : await db.from('photo_library').update({ last_used_on: date, use_count: ((row?.use_count as number | undefined) ?? 0) + 1 }).eq('id', s.image_library_id!)
     if (useError) log(`Could not record the use of a library photo (it may repeat sooner): ${useError.message}`)
   }
+}
+
+/** A stored claim check, or null if it is missing or malformed (then the story is simply checked again). */
+export function parseStoredCheck(raw: unknown): StoredClaimCheck | null {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+  if (!r || typeof r.hash !== 'string' || !['verified', 'contradicted', 'inconclusive'].includes(r.verdict as string)) return null
+  return {
+    verdict: r.verdict as StoredClaimCheck['verdict'],
+    issues: Array.isArray(r.issues) ? r.issues.filter((i): i is string => typeof i === 'string').slice(0, 30) : [],
+    unavailable: r.unavailable === true,
+    hash: r.hash,
+    checkedAt: typeof r.checkedAt === 'string' ? r.checkedAt : '',
+  }
+}
+
+/**
+ * At draft time, with minutes to spare: check every candidate's claims and store each result with the fingerprint
+ * of the text it read, for the 7:00 AM publisher to reuse. Slow and patient on purpose (a few at a time, generous
+ * timeouts and retries). Never throws and never blocks the draft: a failure only means 7:00 AM checks that story.
+ */
+export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number } = {}): Promise<{ checked: number; stored: number }> {
+  if (!verify) return { checked: 0, stored: 0 }
+  let edition: StoredEdition | null = null
+  try {
+    edition = await supabasePublishStore(db).loadEdition(date)
+  } catch (e) {
+    log(`Claim checks skipped: ${e instanceof Error ? e.message : e}`)
+    return { checked: 0, stored: 0 }
+  }
+  if (!edition || edition.status === 'published') return { checked: 0, stored: 0 }
+  const candidates = edition.stories.filter((s) => s.role !== 'rejected')
+  let stored = 0
+  // One at a time, a few seconds apart: the free Gemini tier allows 15 requests a minute, and the draft run has
+  // already used two. Eight stories take well under a minute, inside the background function's 15 minutes.
+  const gap = options.gapMs ?? 4_500
+  await eachLimited(candidates, 1, async (s) => {
+    if (candidates.indexOf(s) > 0 && gap > 0) await new Promise((r) => setTimeout(r, gap))
+    const v = await verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
+    const record: StoredClaimCheck = { ...v, hash: contentHash(s), checkedAt: new Date().toISOString() }
+    const { error } = await db.from('stories').update({ claim_check: record }).eq('id', s.id)
+    if (error) log(`Could not store the claim check for "${s.headline.slice(0, 40)}": ${error.message}`)
+    else stored++
+  })
+  log(`Claim checks stored for ${stored} of ${candidates.length} stories`)
+  return { checked: candidates.length, stored }
+}
+
+/** The verifier for the draft run: no 30-second ceiling here, so it waits longer and retries more before giving up. */
+export function draftClaimVerifier(): ClaimVerifier | undefined {
+  const c = env()
+  if (!c.aiKey) return undefined
+  return aiClaimVerifier(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 60, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : [5_000, 20_000, 40_000] }))
 }

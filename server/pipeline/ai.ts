@@ -7,6 +7,8 @@ export interface JsonRequest {
   /** A strict JSON Schema: every property required, additionalProperties false. */
   schema: Record<string, unknown>
   maxTokens: number
+  /** Abandon the request (and any wait before a retry) when this fires. */
+  signal?: AbortSignal
 }
 
 export interface AiClient {
@@ -15,7 +17,13 @@ export interface AiClient {
 
 import { explainAuthFailure, isAuthFailure, normaliseKey } from './gemini.ts'
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** Wait, unless the signal fires first (then reject at once, so no caller is kept waiting). */
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason ?? new Error('Aborted'))
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener('abort', () => (clearTimeout(t), reject(signal.reason ?? new Error('Aborted'))), { once: true })
+  })
 
 /** Models sometimes wrap JSON in a code fence when strict schemas aren't enforced. */
 const parseJson = <T>(text: string): T => JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, ''))
@@ -31,7 +39,7 @@ export interface AiOptions {
   /** "low" or "none" makes thinking models (Gemini, o-series) answer much faster. Only sent when set. */
   reasoningEffort?: string
   timeoutSeconds?: number
-  /** Waits between retries of a busy provider (default 5s, 20s, 60s). */
+  /** Waits between retries of a busy provider (default 5s, 20s, 60s). The number of entries is the number of retries. */
   retryDelaysMs?: number[]
   /** Which environment variable the key came from, for error messages. */
   keySource?: 'GEMINI_API_KEY' | 'OPENAI_API_KEY' | 'none'
@@ -62,7 +70,7 @@ export function openAiClient(rawKey: string, model: string, baseUrl = 'https://a
             max_completion_tokens: request.maxTokens,
             ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
           }),
-          signal: AbortSignal.timeout((options.timeoutSeconds ?? 240) * 1000),
+          signal: request.signal ? AbortSignal.any([AbortSignal.timeout((options.timeoutSeconds ?? 240) * 1000), request.signal]) : AbortSignal.timeout((options.timeoutSeconds ?? 240) * 1000),
         })
         const detail = res.ok ? '' : await res.clone().text()
         // A rejected KEY is not a schema problem: report it at once instead of retrying in a different request format.
@@ -77,10 +85,13 @@ export function openAiClient(rawKey: string, model: string, baseUrl = 'https://a
         }
         // Rate limits and overloaded servers are usually brief: wait and retry a few times (5s, 20s, 60s).
         // Nothing else is worth repeating, or paying for.
-        if ((res.status === 429 || res.status >= 500) && retries < 3) {
-          const wait = (options.retryDelaysMs ?? [5_000, 20_000, 60_000])[retries++] ?? 60_000
-          options.log?.(`AI provider busy (HTTP ${res.status}); retry ${retries}/3 in ${wait / 1000}s`)
-          await sleep(wait)
+        // Exactly as many retries as there are delays: a short list never falls back to a long wait.
+        const delays = options.retryDelaysMs ?? [5_000, 20_000, 60_000]
+        if ((res.status === 429 || res.status >= 500) && retries < delays.length) {
+          const wait = delays[retries++]
+          options.log?.(`AI provider busy (HTTP ${res.status}); retry ${retries}/${delays.length} in ${wait / 1000}s`)
+          void res.body?.cancel().catch(() => {})
+          await sleep(wait, request.signal)
           continue
         }
         if (!res.ok) throw new Error(`AI provider error ${res.status}: ${(await res.text()).slice(0, 240)}`)
