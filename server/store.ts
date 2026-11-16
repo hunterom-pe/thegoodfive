@@ -301,7 +301,7 @@ export function parseStoredCheck(raw: unknown): StoredClaimCheck | null {
  * of the text it read, for the 7:00 AM publisher to reuse. Slow and patient on purpose (a few at a time, generous
  * timeouts and retries). Never throws and never blocks the draft: a failure only means 7:00 AM checks that story.
  */
-export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number } = {}): Promise<{ checked: number; stored: number }> {
+export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number; budgetMs?: number } = {}): Promise<{ checked: number; stored: number }> {
   if (!verify) return { checked: 0, stored: 0 }
   let edition: StoredEdition | null = null
   try {
@@ -316,15 +316,23 @@ export async function storeDraftClaimChecks(db: SupabaseClient, date: string, ve
   // One at a time, a few seconds apart: the free Gemini tier allows 15 requests a minute, and the draft run has
   // already used two. Eight stories take well under a minute, inside the background function's 15 minutes.
   const gap = options.gapMs ?? 4_500
+  // An overall limit, so a struggling AI provider can never keep the background function running until the
+  // platform kills it (it has 15 minutes in all, and the pipeline has already used some). Unchecked stories are
+  // simply checked at 7:00 AM.
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new Error('The draft-time claim checks ran out of time.')), options.budgetMs ?? 4 * 60_000)
   await eachLimited(candidates, 1, async (s) => {
+    if (deadline.signal.aborted) return
     if (candidates.indexOf(s) > 0 && gap > 0) await new Promise((r) => setTimeout(r, gap))
-    const v = await verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
+    if (deadline.signal.aborted) return
+    const v = await verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }, deadline.signal).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
     const record: StoredClaimCheck = { ...v, hash: contentHash(s), checkedAt: new Date().toISOString() }
     const { error } = await db.from('stories').update({ claim_check: record }).eq('id', s.id)
     if (error) log(`Could not store the claim check for "${s.headline.slice(0, 40)}": ${error.message}`)
     else stored++
   })
-  log(`Claim checks stored for ${stored} of ${candidates.length} stories`)
+  clearTimeout(timer)
+  log(`Claim checks stored for ${stored} of ${candidates.length} stories${deadline.signal.aborted ? ' (stopped at the time limit)' : ''}`)
   return { checked: candidates.length, stored }
 }
 

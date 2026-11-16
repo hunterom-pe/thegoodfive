@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { CATEGORIES } from '../lib/categories'
 import { dismissProgress, readerStores, recordProgress, resumeOffer, toggleSaved, useStore, type Progress } from '../lib/reader'
-import { storyScrollTarget, useReadingPosition } from '../lib/readingPosition'
+import { storyScrollTarget, useCurrentStory, useEditionFinished, useReadingPosition } from '../lib/readingPosition'
 import type { PublicEdition, PublicStory } from '../lib/types'
 import { wrap } from './Brand'
 import { ImageShareButton } from './ImageShare'
@@ -30,6 +30,26 @@ export function goToStory(n: number, fraction = 0) {
   window.scrollTo({ top, behavior: prefersReducedMotion() ? 'instant' : 'smooth' })
   if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1')
   el.focus({ preventScroll: true })
+}
+
+/** A link to a story anchor that scrolls there (respecting reduced motion), updates the URL and moves focus. */
+function StoryLink({ position, current, className, label, title, children }: { position: number; current: boolean; className: string; label: string; title?: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={`#story-${position}`}
+      title={title}
+      aria-current={current ? 'location' : undefined}
+      aria-label={label}
+      onClick={(e) => {
+        e.preventDefault()
+        history.replaceState(null, '', `#story-${position}`)
+        goToStory(position)
+      }}
+      className={className}
+    >
+      {children}
+    </a>
+  )
 }
 
 // ── Save ──────────────────────────────────────────────────────────────
@@ -65,7 +85,7 @@ export function SaveButton({ story, className = '' }: { story: PublicStory; clas
  * stories already passed show a filled square. It sits inside the sticky header, so it never covers the text.
  */
 export function StoryStrip({ stories }: { stories: PublicStory[] }) {
-  const { story: current } = useReadingPosition()
+  const current = useCurrentStory()
   return (
     <nav aria-label="Stories in this edition" className="story-strip border-t border-line">
       <ol className="flex">
@@ -73,20 +93,15 @@ export function StoryStrip({ stories }: { stories: PublicStory[] }) {
           const here = s.position === current
           return (
             <li key={s.id} className="flex-1">
-              <a
-                href={`#story-${s.position}`}
-                aria-current={here ? 'location' : undefined}
-                aria-label={`Story ${s.position} of ${stories.length}: ${s.headline}`}
-                onClick={(e) => {
-                  e.preventDefault()
-                  history.replaceState(null, '', `#story-${s.position}`)
-                  goToStory(s.position)
-                }}
+              <StoryLink
+                position={s.position}
+                current={here}
+                label={`Story ${s.position} of ${stories.length}: ${s.headline}`}
                 className={`flex h-11 items-center justify-center gap-1.5 border-r border-line text-[0.75rem] font-semibold tabular-nums tracking-[0.08em] transition-colors last:border-r-0 ${here ? 'bg-forest text-chalk' : 'text-forest hover:bg-mist'}`}
               >
                 <span className={`size-1.5 ${here ? 'bg-chalk' : s.position < current ? 'bg-forest' : 'border border-forest'}`} aria-hidden="true" />
                 {two(s.position)}
-              </a>
+              </StoryLink>
             </li>
           )
         })}
@@ -101,7 +116,8 @@ export function StoryStrip({ stories }: { stories: PublicStory[] }) {
  * column. Category and number are visible; the full headline is in the accessible name and tooltip.
  */
 export function ContentsRail({ stories }: { stories: PublicStory[] }) {
-  const { story: current, finished } = useReadingPosition()
+  const current = useCurrentStory()
+  const finished = useEditionFinished()
   return (
     <nav aria-label="Contents" className={`contents-rail ${finished ? 'is-past' : ''}`}>
       <p className="label mb-3 text-earth">Contents</p>
@@ -110,21 +126,16 @@ export function ContentsRail({ stories }: { stories: PublicStory[] }) {
           const here = s.position === current
           return (
             <li key={s.id}>
-              <a
-                href={`#story-${s.position}`}
+              <StoryLink
+                position={s.position}
+                current={here}
                 title={s.headline}
-                aria-current={here ? 'location' : undefined}
-                aria-label={`Story ${s.position}: ${s.headline}`}
-                onClick={(e) => {
-                  e.preventDefault()
-                  history.replaceState(null, '', `#story-${s.position}`)
-                  goToStory(s.position)
-                }}
+                label={`Story ${s.position}: ${s.headline}`}
                 className={`group flex min-h-11 items-center gap-3 border-l-2 py-1 pl-3 transition-colors ${here ? 'border-forest' : 'border-transparent hover:border-sage'}`}
               >
                 <span className={`font-display text-[1.375rem] leading-none tabular-nums ${here ? 'text-forest' : s.position < current ? 'text-sage-deep' : 'text-ink/55'}`}>{two(s.position)}</span>
                 <span className={`label leading-tight ${here ? 'text-forest' : 'text-ink/70'}`}>{CATEGORIES[s.category].short}</span>
-              </a>
+              </StoryLink>
             </li>
           )
         })}
@@ -167,7 +178,7 @@ export function ResumeReading() {
       return () => clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position.story, position.fraction, position.finished, interactive, date])
+  }, [position.story, position.finished, interactive, date]) // the exact place within a story is saved on leaving, not on every scroll step
 
   // A final write when the reader leaves or switches away.
   useEffect(() => {

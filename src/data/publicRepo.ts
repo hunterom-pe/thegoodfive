@@ -126,14 +126,12 @@ async function rest<T>(path: string): Promise<T> {
 }
 
 /**
- * Approved follow-up links touching these stories. Optional context: if the view is missing (migration not yet
+ * Approved follow-up links touching this edition's stories. Optional context: if the view is missing (migration not yet
  * run) or the request fails, the edition simply shows without them.
  */
-async function loadFollowUps(ids: string[]): Promise<FollowUpRow[]> {
-  if (ids.length === 0) return []
-  const list = ids.join(',')
+async function loadFollowUps(date: string): Promise<FollowUpRow[]> {
   try {
-    return await rest<FollowUpRow[]>(`public_followups?select=*&or=(earlier_story_id.in.(${list}),later_story_id.in.(${list}))`)
+    return await rest<FollowUpRow[]>(`public_followups?select=*&or=(earlier_date.eq.${date},later_date.eq.${date})`)
   } catch {
     return []
   }
@@ -162,13 +160,14 @@ async function loadEdition(filter: string): Promise<PublicEdition | null> {
     `public_editions?select=id,edition_date,published_at&${filter}&edition_date=lte.${todayISO()}&order=edition_date.desc&limit=1`,
   )
   if (!edition) return null
-  const stories = await rest<StoryRow[]>(`public_stories?select=*&edition_id=eq.${edition.id}&order=position.asc`)
+  // Stories and their follow-up links in parallel: the links are found by edition date, so no extra round trip.
+  const [stories, followUps] = await Promise.all([rest<StoryRow[]>(`public_stories?select=*&edition_id=eq.${edition.id}&order=position.asc`), loadFollowUps(edition.edition_date)])
   return {
     id: edition.id,
     date: edition.edition_date,
     publishedAt: edition.published_at,
     isDemo: false,
-    stories: attachFollowUps(stories.map(storyFromRow), await loadFollowUps(stories.map((s) => s.id))),
+    stories: attachFollowUps(stories.map(storyFromRow), followUps),
   }
 }
 

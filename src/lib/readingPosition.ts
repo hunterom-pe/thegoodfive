@@ -86,6 +86,16 @@ export function useReadingPosition(): ReadingPosition {
   return useSyncExternalStore(subscribe, () => current, () => START)
 }
 
+/** Just the current story number: components using this re-render only when the story changes, not on every scroll step. */
+export function useCurrentStory(): number {
+  return useSyncExternalStore(subscribe, () => current.story, () => 0)
+}
+
+/** Whether the back cover is in view. */
+export function useEditionFinished(): boolean {
+  return useSyncExternalStore(subscribe, () => current.finished, () => false)
+}
+
 /** The y-coordinate to scroll to so that `fraction` of story `n` sits just below the sticky header. */
 export function storyScrollTarget(n: number, fraction: number): number | null {
   const el = document.getElementById(`story-${n}`)

@@ -132,6 +132,11 @@ export interface AutoPublishOptions {
   verify?: ClaimVerifier
   /** Longest to wait for all claim checks (the scheduled function has about 30 seconds in all). Default 20s. */
   verifyBudgetMs?: number
+  /**
+   * The whole run must finish inside the scheduled function's ~30 seconds, or the platform kills and re-runs it.
+   * Live claim checks get at most what is left of this after loading and source checks. Default 24s.
+   */
+  runBudgetMs?: number
   extraTrustedDomains?: string
   notify?: Notify
   log?: (line: string) => void
@@ -147,7 +152,7 @@ export interface AutoPublishOutcome {
 export function makeSourceChecker(domains: string[], fetchImpl: typeof fetch = fetch): SourceChecker {
   return async (url) => {
     try {
-      const res = await fetchImpl(url, { redirect: 'follow', headers: { 'User-Agent': 'TheGoodFiveBot/1.0 (link check)', Accept: 'text/html' }, signal: AbortSignal.timeout(9_000) })
+      const res = await fetchImpl(url, { redirect: 'follow', headers: { 'User-Agent': 'TheGoodFiveBot/1.0 (link check)', Accept: 'text/html' }, signal: AbortSignal.timeout(7_000) })
       void res.body?.cancel().catch(() => {})
       const finalUrl = res.url || url
       if (res.status === 403 || res.status === 429) return { ok: true, warning: `The site refused an automated re-check (HTTP ${res.status}); relying on the text retrieved earlier.` }
@@ -178,6 +183,7 @@ const toGate = (s: StoredStory): GateStory => ({
 export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublishOutcome> {
   const log = o.log ?? (() => {})
   const now = o.now ?? new Date()
+  const runStarted = Date.now()
   const tracked = trackedNotifier(o.notify)
   const record = async (status: PublishStatus, reason: string, details: PublishRunRecord['details'] = {}): Promise<AutoPublishOutcome> => {
     const live = !o.dryRun && o.trigger !== 'check'
@@ -262,7 +268,10 @@ export async function runAutoPublish(o: AutoPublishOptions): Promise<AutoPublish
       // A hard deadline for the checks still needed (the scheduled function has about 30 seconds in all). When it
       // passes, unfinished requests are cancelled, so the function ends instead of hanging; finished results are kept.
       const deadline = new AbortController()
-      const timer = setTimeout(() => deadline.abort(new Error('The claim check timed out.')), o.verifyBudgetMs ?? 20_000)
+      const remaining = (o.runBudgetMs ?? 24_000) - (Date.now() - runStarted)
+      // At least a second for whatever is left of the run, never more than the claim-check budget itself.
+      const budget = Math.min(o.verifyBudgetMs ?? 20_000, Math.max(1_000, remaining))
+      const timer = setTimeout(() => deadline.abort(new Error('The claim check timed out.')), budget)
       const expired = new Promise<Verification>((resolve) => deadline.signal.addEventListener('abort', () => resolve(timedOut), { once: true }))
       await eachLimited(fresh, VERIFY_CONCURRENCY, async (c) => {
         if (deadline.signal.aborted) return void verdicts.set(c.item.id, timedOut)

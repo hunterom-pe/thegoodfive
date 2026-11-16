@@ -1,11 +1,11 @@
-import { useReadingPosition } from '../lib/readingPosition'
+import { useCurrentStory } from '../lib/readingPosition'
 
 /**
  * Five squares in the header that fill as you read, each a link to its story. Shown on mid-width screens
  * (1024-1439px); narrower screens get the story strip and wider ones the contents rail instead (index.css).
  */
 export function StoryProgress({ count = 5 }: { count?: number }) {
-  const { story: reached } = useReadingPosition()
+  const reached = useCurrentStory()
   const numbers = Array.from({ length: count }, (_, i) => i + 1)
   return (
     <nav aria-label="Stories in this edition" className="progress-links items-center">

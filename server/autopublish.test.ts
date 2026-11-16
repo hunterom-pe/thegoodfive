@@ -560,3 +560,14 @@ describe('claim checks under real-world conditions (the 16 November failure)', (
   })
 })
 const store_primary = (out: Awaited<ReturnType<typeof runAutoPublish>>) => out.record.details.accepted?.map((a) => a.headline) ?? []
+
+describe('one deadline for the whole publish run', () => {
+  it('gives the claim checks only the time left after loading and source checks', async () => {
+    const slowSources: SourceChecker = () => new Promise((r) => setTimeout(() => r({ ok: true }), 60))
+    const neverAnswers: ClaimVerifier = () => new Promise(() => {})
+    const started = Date.now()
+    const out = await go(new MemoryStore(edition(fiveGood())), { checkSource: slowSources, verify: neverAnswers, runBudgetMs: 100, verifyBudgetMs: 10_000 })
+    expect(out.status).toBe('failed')
+    expect(Date.now() - started).toBeLessThan(2_000) // not the 10s verify budget: the run's own deadline wins
+  })
+})

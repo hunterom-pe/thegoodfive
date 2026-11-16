@@ -26,10 +26,11 @@ export const SIZES: Record<CardFormat | 'keepsake', { width: number; height: num
 export type Measure = (text: string, size: number) => number
 
 /** Grapheme-safe characters (emoji and accented letters stay whole). */
-const chars = (t: string): string[] => {
-  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter
-  return Seg ? [...new Seg(undefined, { granularity: 'grapheme' }).segment(t)].map((s) => s.segment) : Array.from(t)
-}
+type Segmenter = { segment(t: string): Iterable<{ segment: string }> }
+const SegmenterCtor = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => Segmenter }).Segmenter
+/** Built once: it is used inside the wrapping loops, which run for every candidate font size. */
+const graphemes: Segmenter | null = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: 'grapheme' }) : null
+const chars = (t: string): string[] => (graphemes ? [...graphemes.segment(t)].map((s) => s.segment) : Array.from(t))
 
 /** Greedy word wrap. A single word wider than the line is broken between characters, so nothing runs off the card. */
 export function wrapText(text: string, maxWidth: number, size: number, measure: Measure): string[] {

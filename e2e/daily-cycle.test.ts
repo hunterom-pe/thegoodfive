@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { executeRun, editionToday, startRun } from '../server/store'
+import { executeRun, editionToday, startRun, storeDraftClaimChecks } from '../server/store'
+import type { ClaimVerifier } from '../server/pipeline/verify'
 import { scheduledDraft, scheduledPublish } from '../server/scheduled'
 import { contentHash } from '../server/autopublish'
 import { localDb, postgresAvailable, startPg, type PgInstance } from './localdb'
@@ -595,6 +596,21 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     const out = await scheduledPublish('schedule', { db })
     expect(out?.status).toBe('published')
     expect(publicDates()).toEqual([TODAY, YESTERDAY])
+  })
+
+  it('draft-time claim checks stop at their time limit instead of outliving the background function', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    pg.exec(`update public.stories set claim_check = null where edition_id = (select id from public.editions where edition_date = '${TODAY}')`)
+    const hangs: ClaimVerifier = (_s, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted'))))
+    const started = Date.now()
+    const result = await storeDraftClaimChecks(db, TODAY, hangs, () => {}, { gapMs: 0, budgetMs: 200 })
+    expect(Date.now() - started).toBeLessThan(3_000)
+    expect(result.checked).toBeGreaterThan(0)
+    // Whatever did not finish is simply checked again at 7:00 AM.
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status, out?.reason).toBe('published')
   })
 
   // ── generation taking too long ───────────────────────────────────────
