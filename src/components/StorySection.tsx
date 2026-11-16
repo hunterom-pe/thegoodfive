@@ -26,7 +26,7 @@ function Offset({ story, isDemo }: Props) {
   return (
     <article {...anchor(story)} className={`${wrap} pb-16 lg:pb-28 lg:pt-4`}>
       {/* On phones a hairline closes the previous story and the numeral opens this one, above its photograph. */}
-      <div className="border-t border-line pt-8 lg:grid lg:grid-cols-12 lg:items-center lg:gap-12 lg:border-t-0 lg:pt-0">
+      <div className="border-t border-line pt-8 lg:grid lg:grid-cols-12 lg:items-center lg:gap-12 lg:pt-12">
         <div className="mb-8 lg:hidden">{heading}</div>
         <Reveal variant="media" className="relative isolate ml-auto w-[82%] sm:w-[60%] lg:order-2 lg:col-span-5 lg:col-start-8 lg:w-full">
           <span data-sq="1" data-from="left" className="absolute -bottom-7 -left-7 -z-10 size-32 bg-sage lg:-bottom-10 lg:-left-10 lg:size-44" aria-hidden="true" />
