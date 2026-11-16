@@ -14,7 +14,7 @@ export function SiteFooter() {
               <span className="font-display text-[1.1875rem] font-[480] tracking-[-0.02em] text-forest">The Good Five</span>
             </Link>
             <p className="mt-4 max-w-[22rem] text-[0.9375rem] leading-relaxed text-ink/75">
-              Five good things. Every day. That’s it. A small independent edition of genuinely good news, found and written up with AI, checked automatically, and open to human correction.
+              Five good things. Every day. That’s it. A small independent edition of genuinely good news from around the world, checked automatically and open to human correction.
             </p>
           </div>
           <nav aria-label="Footer" className="mt-7 grid grid-cols-2 gap-x-6 lg:col-span-5 lg:col-start-8 lg:mt-0">

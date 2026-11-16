@@ -9,15 +9,26 @@ import { StoryActions } from './ReaderTools'
 
 export const two = (n: number) => String(n).padStart(2, '0')
 
-/** ■ 01 / 05 ── Nature & Wildlife */
+/**
+ * The story's number as a typographic element. All five stories use this one size, so no story outranks another;
+ * each composition frames it differently. Decorative: the number is announced once, by StoryMeta.
+ */
+export function StoryNumeral({ story, className = '' }: { story: PublicStory; className?: string }) {
+  return (
+    <span aria-hidden="true" className={`display block shrink-0 tabular-nums text-[4.25rem] !leading-[0.8] lg:text-[5.5rem] ${className}`}>
+      {two(story.position)}
+    </span>
+  )
+}
+
+/** ■ Nature & Wildlife. The number is spoken here ("Story 1 of 5") and shown by StoryNumeral, so it is not repeated as text. */
 export function StoryMeta({ story, total = 5, className = '' }: { story: PublicStory; total?: number; className?: string }) {
   return (
     <p className={`label flex items-center gap-2.5 text-forest ${className}`}>
-      <span className="size-2 bg-forest" aria-hidden="true" />
-      <span className="tabular-nums">
-        {two(story.position)} <span className="text-sage-deep">/</span> {two(total)}
+      <span className="size-2 shrink-0 bg-forest" aria-hidden="true" />
+      <span className="sr-only">
+        Story {story.position} of {total}:{' '}
       </span>
-      <span className="h-px w-5 bg-sage" aria-hidden="true" />
       <span className="text-earth">{CATEGORIES[story.category].label}</span>
     </p>
   )
