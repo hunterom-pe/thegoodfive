@@ -254,9 +254,10 @@ export function KeepsakeButton({ edition }: { edition: PublicEdition }) {
   const reader = useReader()
   if (!reader?.interactive) return null
   return (
-    <p className="mt-10 text-[0.9375rem] text-chalk/80">
+    // A div, not a p: the share button carries its dialog, and a dialog (with headings and lists) can't sit in a p.
+    <div className="mt-10 text-[0.9375rem] text-chalk/80">
       <ImageShareButton what={{ kind: 'edition', edition }} label="Keep this edition’s cover" className="font-semibold text-chalk underline decoration-chalk/40 underline-offset-4 hover:decoration-chalk" />
       <span className="ml-2 text-chalk/60">An image of this edition’s five, to save or share.</span>
-    </p>
+    </div>
   )
 }

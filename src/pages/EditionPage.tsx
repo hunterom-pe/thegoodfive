@@ -40,6 +40,21 @@ export function EditionPage() {
         {state.status === 'ready' &&
           (edition ? (
             <EditionView edition={edition} context={edition.date === todayISO() ? 'today' : 'archive'} />
+          ) : date === todayISO() ? (
+            <PageMessage
+              title="Today’s edition isn’t ready yet."
+              action={
+                <Link to="/" className="btn btn-solid">
+                  Read the latest edition
+                </Link>
+              }
+            >
+              It’s still being checked before it’s published. Until then, the most recent edition is on the front page.
+            </PageMessage>
+          ) : date > todayISO() ? (
+            <PageMessage title="That edition hasn’t been published yet." action={back}>
+              Editions appear on the morning of their date.
+            </PageMessage>
           ) : (
             <PageMessage title="There’s no edition for that date." action={back}>
               Either we didn’t publish that day, or the date isn’t quite right.
