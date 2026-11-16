@@ -127,20 +127,34 @@ export interface CoverSquare {
  */
 export function coverLayout(date: string, categories: Category[]): CoverSquare[] {
   const rand = seeded(hashString(`good-five:${date}`))
-  const sizes = [34, 26, 20, 16, 12].map((s) => s + Math.round(rand() * 8) - 4) // lead story largest
-  const placed: CoverSquare[] = []
+  const base = [34, 26, 20, 16, 12].map((s) => s + Math.round(rand() * 8) - 4) // lead story largest
+  const colorOf = (i: number) => CATEGORY_COLOR[categories[i] ?? 'nature'] ?? COLORS.sage
   const overlaps = (a: CoverSquare, b: CoverSquare, gap = 3) => a.x < b.x + b.size + gap && b.x < a.x + a.size + gap && a.y < b.y + b.size + gap && b.y < a.y + a.size + gap
-  sizes.forEach((size, i) => {
-    const color = CATEGORY_COLOR[categories[i] ?? 'nature'] ?? COLORS.sage
-    let square: CoverSquare | null = null
-    for (let attempt = 0; attempt < 200 && !square; attempt++) {
-      const s = { x: 4 + Math.round(rand() * (92 - size)), y: 4 + Math.round(rand() * (92 - size)), size, color, story: i + 1 }
-      if (!placed.some((p) => overlaps(p, s))) square = s
+  // Try the full sizes first; if a crowded draw can't place all five, try again a little smaller. All of it is
+  // driven by the same seed, so the result is still the same on every device.
+  for (const scale of [1, 0.9, 0.8, 0.7, 0.6]) {
+    const placed: CoverSquare[] = []
+    for (let i = 0; i < 5; i++) {
+      const size = Math.max(8, Math.round(base[i] * scale))
+      let square: CoverSquare | null = null
+      for (let attempt = 0; attempt < 120 && !square; attempt++) {
+        const s = { x: 4 + Math.round(rand() * (92 - size)), y: 4 + Math.round(rand() * (92 - size)), size, color: colorOf(i), story: i + 1 }
+        if (!placed.some((p) => overlaps(p, s))) square = s
+      }
+      if (!square) break
+      placed.push(square)
     }
-    // Practically never needed: fall back to a fixed diagonal slot that cannot overlap.
-    placed.push(square ?? { x: 4 + i * 18, y: 4 + i * 18, size: Math.min(size, 14), color, story: i + 1 })
-  })
-  return placed
+    if (placed.length === 5) return placed
+  }
+  // A fixed arrangement that cannot overlap, should every draw fail (none did across years of dates in testing).
+  const fixed = [
+    [4, 4, 34],
+    [46, 10, 26],
+    [10, 46, 20],
+    [50, 50, 16],
+    [76, 76, 12],
+  ]
+  return fixed.map(([x, y, size], i) => ({ x, y, size, color: colorOf(i), story: i + 1 }))
 }
 
 // ── Drawing ───────────────────────────────────────────────────────────
@@ -194,13 +208,20 @@ export function drawStoryCard(ctx: CanvasRenderingContext2D, card: StoryCardData
 
   // Story label and headline
   const top = pad + 270
+  if (format === 'portrait') {
+    // The tall card has room for the edition's own colours: a band of the five squares under the masthead.
+    fiveSquares(ctx, W - pad - 5 * 26 - 4 * 12, pad, 26, 12, [COLORS.sageLight, COLORS.blush, COLORS.sage, COLORS.earth, COLORS.forest])
+  }
   label(ctx, `${String(card.position).padStart(2, '0')} / 05 · ${CATEGORIES[card.category]?.label ?? ''}`, pad, top, 26, COLORS.forest)
   const footer = format === 'square' ? 190 : 260
   const box = { width: W - 2 * pad, height: H - (top + 50) - footer - pad }
   const fitted = fitText(card.headline, box, { maxSize: format === 'square' ? 88 : 104, minSize: format === 'square' ? 46 : 52, leading: 1.08 }, measurer(ctx, DISPLAY, 420))
   ctx.font = `420 ${fitted.size}px ${DISPLAY}`
   ctx.fillStyle = COLORS.forest
-  fitted.lines.forEach((line, i) => ctx.fillText(line, pad, top + 50 + fitted.size + i * fitted.lineHeight))
+  // On the tall format, the headline sits a little above the middle of its space instead of hanging from the top.
+  const spare = box.height - fitted.lines.length * fitted.lineHeight
+  const offset = format === 'portrait' ? Math.max(0, Math.round(spare * 0.38)) : 0
+  fitted.lines.forEach((line, i) => ctx.fillText(line, pad, top + 50 + offset + fitted.size + i * fitted.lineHeight))
 
   // Brand squares bottom right, out of the text's way
   const s = format === 'square' ? 120 : 170
