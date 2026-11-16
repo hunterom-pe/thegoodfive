@@ -35,7 +35,8 @@ describe('feeds', () => {
   })
   it('parses GDELT and its timestamp format', () => {
     const [a] = parseGdelt({ articles: [{ url: 'https://ex.org/g', title: 'Headline', seendate: '20261113T101500Z', domain: 'ex.org', language: 'English' }, { url: 'ftp://bad', title: 'x', seendate: '', domain: '', language: '' }] })
-    expect(a).toMatchObject({ publishedAt: '2026-11-13T10:15:00Z', via: 'GDELT', excerpt: '' })
+    // The index time is a discovery time, never a publication date.
+    expect(a).toMatchObject({ publishedAt: null, discoveredAt: '2026-11-13T10:15:00Z', via: 'GDELT', excerpt: '' })
   })
 })
 

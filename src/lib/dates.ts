@@ -28,6 +28,9 @@ function fmt(date: string, options: Intl.DateTimeFormatOptions): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', ...options }).format(new Date(`${date.slice(0, 10)}T12:00:00Z`))
 }
 
+/** The day to print beside a source: the publisher's own day when known, else the UTC day of the timestamp. */
+export const sourceDay = (on: string | null | undefined, at: string | null | undefined): string | null => (on || at || '').slice(0, 10) || null
+
 /** "Friday 13 November 2026" */
 export const formatLong = (date: string) => fmt(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).replace(',', '')
 /** "13 Nov 2026" */

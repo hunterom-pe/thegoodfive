@@ -28,3 +28,12 @@ describe('dates', () => {
     expect(isISODate('1900-02-29')).toBe(false)
   })
 })
+
+describe('sourceDay', () => {
+  it('prefers the publisher’s printed day over the UTC day of the timestamp', async () => {
+    const { sourceDay } = await import('./dates')
+    expect(sourceDay('2026-11-15', '2026-11-16T03:51:01+00:00')).toBe('2026-11-15')
+    expect(sourceDay(null, '2026-11-16T03:51:01+00:00')).toBe('2026-11-16') // older stories keep their existing label
+    expect(sourceDay(undefined, null)).toBeNull()
+  })
+})

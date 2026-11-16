@@ -153,7 +153,8 @@ export function ImageShareButton({ what, label, className = '' }: { what: What; 
             <fieldset className="mt-3 flex gap-2">
               <legend className="sr-only">Image shape</legend>
               {(['square', 'portrait'] as const).map((f) => (
-                <label key={f} className={`btn !min-h-11 cursor-pointer ${format === f ? 'btn-solid' : 'btn-quiet'}`}>
+                // The real radio is visually hidden, so its label shows the keyboard focus (the site's own focus ring).
+                <label key={f} className={`btn !min-h-11 cursor-pointer has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-[3px] has-[:focus-visible]:outline-forest ${format === f ? 'btn-solid' : 'btn-quiet'}`}>
                   <input type="radio" name={`${id}-f`} value={f} checked={format === f} onChange={() => setFormat(f)} className="sr-only" />
                   {f === 'square' ? 'Square' : 'Portrait (for stories)'}
                 </label>

@@ -649,4 +649,17 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     const res = await fetch('https://e2e.site/.netlify/functions/generate-draft-background', { method: 'POST', headers: { 'x-generation-secret': 'wrong' }, body: JSON.stringify({ runId: 'x', date: TODAY }) })
     expect(res.status).toBe(403)
   })
+
+  // ── the publisher's printed day ──────────────────────────────────────
+  it('carries the day a publisher prints from the draft to readers, beside the exact moment', () => {
+    const story = (n: number, extra: string) => `{"role":"primary","position":${n},"category":"science","headline":"Printed day ${n}","summary":"S","source_name":"ScienceDaily","source_url":"https://www.sciencedaily.com/releases/2026/11/${n}.htm","source_published_at":"2026-11-16T03:51:01Z"${extra}}`
+    // Story 1 carries the printed day (15 November, New York); story 2 comes from older code that sends none.
+    const stories = `[${story(1, ',"source_published_on":"2026-11-15"')},${story(2, '')}]`
+    pg.query(`select public.create_draft_edition('${TODAY}', '${stories}'::jsonb)`)
+    pg.exec(`update public.editions set status = 'published', published_at = now() where edition_date = '${TODAY}'`)
+    const rows = pg.query(`select s.position, s.source_published_at::text as at, s.source_published_on::text as on_day from public.public_stories s join public.public_editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' order by s.position`, 'anon') as { position: number; at: string; on_day: string | null }[]
+    expect(rows[0]).toMatchObject({ on_day: '2026-11-15' })
+    expect(rows[0].at).toMatch(/^2026-11-16 03:51:01/)
+    expect(rows[1].on_day).toBeNull() // older rows fall back to the UTC day of the instant
+  })
 })

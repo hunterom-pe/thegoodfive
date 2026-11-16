@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
 import { CATEGORIES } from '../lib/categories'
-import { formatShort } from '../lib/dates'
+import { formatShort, sourceDay } from '../lib/dates'
 import type { PublicStory } from '../lib/types'
 import { Arrow } from './Brand'
 import { StoryArt } from './StoryArt'
@@ -131,7 +131,7 @@ export function StorySource({ story, isDemo, className = '' }: { story: PublicSt
         {story.sourcePublishedAt && (
           <>
             {' · '}
-            <time dateTime={story.sourcePublishedAt.slice(0, 10)}>{formatShort(story.sourcePublishedAt)}</time>
+            <time dateTime={sourceDay(story.sourcePublishedOn, story.sourcePublishedAt)!}>{formatShort(sourceDay(story.sourcePublishedOn, story.sourcePublishedAt)!)}</time>
           </>
         )}
         {isDemo && <span className="label ml-2 border border-earth/50 px-1.5 py-0.5 text-[0.5625rem] text-earth">Sample</span>}

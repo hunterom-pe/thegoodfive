@@ -269,6 +269,7 @@ export function assemble(written: WrittenStory[], shortlist: Shortlisted[], log:
     source_name: a.source.candidate.sourceName,
     source_url: a.source.candidate.url,
     source_published_at: a.source.candidate.publishedAt,
+    source_published_on: a.source.candidate.publishedOn ?? null,
     original_title: a.source.candidate.title,
     original_excerpt: truncate(a.source.material, 700),
     source_material: a.source.material,

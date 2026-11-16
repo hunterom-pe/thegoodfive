@@ -5,6 +5,7 @@ import { attachImages, type ImageOptions } from './images.ts'
 import { applyGates } from './lineup.ts'
 import { normalizeUrl } from './dedupe.ts'
 import { trustedDomains } from './sources.ts'
+import { parsePublication } from './pubdate.ts'
 import { dedupe, withinWindow } from './dedupe.ts'
 import { FEEDS, GDELT_QUERIES } from './feeds.ts'
 import { fetchGdelt } from './gdelt.ts'
@@ -141,9 +142,17 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const withMaterial = await mapLimit(ranked, 5, async (r): Promise<Shortlisted> => {
     stop()
     const article = await fetchMaterial(r.candidate.url)
-    return { ...r, material: materialFor(r.candidate, article), images: article?.images ?? [] }
+    // An item whose feed gave no publication date (GDELT only says when it indexed the article) takes the date
+    // the article declares for itself. With none, it stays undated and the freshness gate rejects it.
+    const declared = r.candidate.publishedAt ? null : parsePublication(article?.publishedRaw)
+    const candidate = declared ? { ...r.candidate, publishedAt: declared.at, publishedOn: declared.on } : r.candidate
+    return { ...r, candidate, material: materialFor(candidate, article), images: article?.images ?? [] }
   })
-  const shortlist = withMaterial.filter((s) => s.material.length >= MIN_MATERIAL_CHARS).map((s) => ({ ...s, material: s.material.slice(0, 3000) }))
+  // Freshness is judged on publication time, so an old article that was only just indexed drops out here.
+  const current = withMaterial.filter((s) => withinWindow([s.candidate], options.windowHours ?? 72, now).length === 1)
+  if (current.length < withMaterial.length) log(`${withMaterial.length - current.length} shortlisted articles were published before the news window (only newly indexed)`)
+  stats.staleByPublication = withMaterial.length - current.length
+  const shortlist = current.filter((s) => s.material.length >= MIN_MATERIAL_CHARS).map((s) => ({ ...s, material: s.material.slice(0, 3000) }))
   stats.withSourceText = shortlist.length
   log(`${shortlist.length} of ${ranked.length} had enough source text to summarise`)
   if (shortlist.length === 0) return { stories: [], stats }

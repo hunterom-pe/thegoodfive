@@ -11,9 +11,13 @@ export interface ArticleMaterial {
   description: string | null
   /** The article's own featured image(s). Candidates only: finding one grants no right to publish it. */
   images: ImageHint[]
+  /** The publication date the page itself declares (metadata), unparsed. */
+  publishedRaw?: string | null
   /** Body text recovered from the page's paragraphs. May be empty (paywalls, scripts). */
   text: string
 }
+
+import { parsePublication } from './pubdate.ts'
 
 const meta = (html: string, name: string): string | null => {
   const tag = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, 'i').exec(html)?.[0]
@@ -77,6 +81,16 @@ export function extractImages(html: string, base: string): ImageHint[] {
   return raw.filter((h) => !seen.has(h.url) && seen.add(h.url))
 }
 
+/** The date a page declares for itself: article metadata first, then structured data. Never a date in the body text. */
+export function declaredDate(html: string): string | null {
+  for (const name of ['article:published_time', 'og:article:published_time', 'datePublished', 'parsely-pub-date', 'DC.date.issued', 'sailthru.date']) {
+    const v = meta(html, name)
+    if (v && parsePublication(v)) return v
+  }
+  for (const m of html.matchAll(/"datePublished"\s*:\s*"([^"]{8,40})"/g)) if (parsePublication(m[1])) return m[1]
+  return null
+}
+
 export function extractArticle(html: string, maxChars = 6_000, base = 'https://example.invalid/'): ArticleMaterial {
   const scope = /<article[\s\S]*?<\/article>/i.exec(html)?.[0] ?? /<main[\s\S]*?<\/main>/i.exec(html)?.[0] ?? html
   const paragraphs = [...scope.matchAll(/<p[\s>][\s\S]*?<\/p>/gi)]
@@ -88,6 +102,7 @@ export function extractArticle(html: string, maxChars = 6_000, base = 'https://e
     images: extractImages(html, base),
     description: meta(html, 'og:description') ?? meta(html, 'description'),
     text: truncate(paragraphs.join('\n\n'), maxChars),
+    publishedRaw: declaredDate(html),
   }
 }
 

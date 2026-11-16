@@ -1,3 +1,4 @@
+import { parsePublication } from './pubdate.ts'
 import { XMLParser } from 'fast-xml-parser'
 import type { Feed } from './feeds.ts'
 import { stripTracking } from './dedupe.ts'
@@ -70,6 +71,7 @@ export function parseFeed(xml: string, feed: Feed): Candidate[] {
       url: item.url,
       sourceName: feed.name.replace(/\s*\(.*\)$/, ''),
       publishedAt: toISO(item.date),
+      publishedOn: parsePublication(item.date)?.on ?? null,
       excerpt: truncate(stripHtml(item.body), 600),
       via: `RSS: ${feed.name}`,
       trust: feed.trust,

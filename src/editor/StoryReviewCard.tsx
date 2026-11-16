@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Arrow } from '../components/Brand'
 import { two } from '../components/StoryParts'
 import { CATEGORIES, CATEGORY_KEYS } from '../lib/categories'
-import { formatShort } from '../lib/dates'
+import { formatShort, sourceDay } from '../lib/dates'
 import { PhotoPanel } from './PhotoPanel'
 import { FollowUpsPanel } from './FollowUpsPanel'
 import type { Category, EditorStory, StoryPatch } from '../lib/types'
@@ -98,7 +98,7 @@ export function StoryReviewCard({
             {CATEGORIES[value.category].short}
             <span className="font-normal normal-case tracking-normal text-ink/70">
               {value.sourceName}
-              {value.sourcePublishedAt && ` · ${formatShort(value.sourcePublishedAt)}`}
+              {sourceDay(value.sourcePublishedOn, value.sourcePublishedAt) && ` · ${formatShort(sourceDay(value.sourcePublishedOn, value.sourcePublishedAt)!)}`}
             </span>
             {story.imageUrl && (
               <span className={`px-1.5 py-0.5 text-[0.5625rem] ${story.imageRightsConfirmed ? 'bg-mist text-forest' : 'bg-blush text-forest-deep'}`}>
@@ -187,7 +187,7 @@ export function StoryReviewCard({
               </select>
             </Field>
             <Field label="Source published">
-              <input type="date" className="field" value={value.sourcePublishedAt?.slice(0, 10) ?? ''} onChange={(e) => set('sourcePublishedAt', e.target.value || null)} />
+              <input type="date" className="field" value={sourceDay(value.sourcePublishedOn, value.sourcePublishedAt) ?? ''} onChange={(e) => set('sourcePublishedAt', e.target.value || null)} />
             </Field>
             <Field label="Publisher">
               <input className="field" value={value.sourceName} onChange={(e) => set('sourceName', e.target.value)} />

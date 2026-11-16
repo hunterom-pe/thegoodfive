@@ -23,7 +23,10 @@ export function parseGdelt(json: unknown): Candidate[] {
       title: a.title.replace(/\s+/g, ' ').trim(),
       url: a.url,
       sourceName: a.domain,
-      publishedAt: seenToISO(a.seendate),
+      // GDELT's date is when it indexed the article, not when it was published. An old article indexed today
+      // must not look fresh, so the publication date is read from the article itself (see pipeline.ts).
+      publishedAt: null,
+      discoveredAt: seenToISO(a.seendate),
       // GDELT is an index of headlines. Any story chosen from it must have
       // its text retrieved before a summary is written (see pipeline.ts).
       excerpt: '',

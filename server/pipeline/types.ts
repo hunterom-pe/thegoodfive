@@ -9,6 +9,10 @@ export interface Candidate {
   sourceName: string
   /** ISO timestamp, or null when the source didn't say. */
   publishedAt: string | null
+  /** The publisher's own calendar day (YYYY-MM-DD), which can differ from the UTC day of `publishedAt`. */
+  publishedOn?: string | null
+  /** When an index (GDELT) first saw the item. Says nothing about when it was published. */
+  discoveredAt?: string | null
   /** Text supplied by the feed itself. Empty for GDELT, which only gives headlines. */
   excerpt: string
   via: string
@@ -57,6 +61,8 @@ export interface DraftStory {
   source_name: string
   source_url: string
   source_published_at: string | null
+  /** The publisher's own calendar day for the article, shown to readers. */
+  source_published_on?: string | null
   original_title: string
   original_excerpt: string
   discovered_via: string

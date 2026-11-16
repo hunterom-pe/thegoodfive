@@ -168,6 +168,7 @@ interface StoryRow {
   source_name: string
   source_url: string
   source_published_at: string | null
+  source_published_on?: string | null
   image_url: string | null
   image_alt: string | null
   image_credit: string | null
@@ -198,6 +199,7 @@ const fromRow = (r: StoryRow): EditorStory => ({
   sourceName: r.source_name,
   sourceUrl: r.source_url,
   sourcePublishedAt: r.source_published_at,
+  sourcePublishedOn: r.source_published_on ?? null,
   imageUrl: r.image_url,
   imageAlt: r.image_alt,
   imageCredit: r.image_credit,
@@ -266,7 +268,9 @@ const supabaseRepo: EditorRepo = {
     }
   },
   async updateStory(_editionId, storyId, patch) {
-    const row = Object.fromEntries(Object.entries(patch).map(([k, v]) => [COLUMN[k as keyof StoryPatch], v === '' ? null : v]))
+    const row: Record<string, unknown> = Object.fromEntries(Object.entries(patch).map(([k, v]) => [COLUMN[k as keyof StoryPatch], v === '' ? null : v]))
+    // An editor's own date replaces the publisher's printed day, so a stale printed day can never outlive it.
+    if ('sourcePublishedAt' in patch) row.source_published_on = patch.sourcePublishedAt ? patch.sourcePublishedAt.slice(0, 10) : null
     const { error } = await supabase!.from('stories').update(row).eq('id', storyId)
     check(error)
   },

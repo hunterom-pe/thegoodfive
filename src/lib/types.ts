@@ -14,6 +14,8 @@ export interface PublicStory {
   sourceUrl: string
   /** When the original article was published (ISO date or timestamp). */
   sourcePublishedAt: string | null
+  /** The day the publisher prints (YYYY-MM-DD). Absent on older stories: the day of `sourcePublishedAt` in UTC is shown instead. */
+  sourcePublishedOn?: string | null
   imageUrl: string | null
   imageAlt: string | null
   imageCredit: string | null

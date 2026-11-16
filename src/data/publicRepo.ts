@@ -108,6 +108,7 @@ interface StoryRow {
   source_name: string
   source_url: string
   source_published_at: string | null
+  source_published_on?: string | null
   image_url: string | null
   image_alt: string | null
   image_credit: string | null
@@ -146,6 +147,7 @@ const storyFromRow = (r: StoryRow): PublicStory => ({
   sourceName: r.source_name,
   sourceUrl: r.source_url,
   sourcePublishedAt: r.source_published_at,
+  sourcePublishedOn: r.source_published_on ?? null,
   imageUrl: r.image_url,
   imageAlt: r.image_alt,
   imageCredit: r.image_credit,
