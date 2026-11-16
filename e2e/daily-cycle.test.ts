@@ -657,9 +657,9 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     const stories = `[${story(1, ',"source_published_on":"2026-11-15"')},${story(2, '')}]`
     pg.query(`select public.create_draft_edition('${TODAY}', '${stories}'::jsonb)`)
     pg.exec(`update public.editions set status = 'published', published_at = now() where edition_date = '${TODAY}'`)
-    const rows = pg.query(`select s.position, s.source_published_at::text as at, s.source_published_on::text as on_day from public.public_stories s join public.public_editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' order by s.position`, 'anon') as { position: number; at: string; on_day: string | null }[]
+    const rows = pg.query(`select s.position, extract(epoch from s.source_published_at)::bigint as at, s.source_published_on::text as on_day from public.public_stories s join public.public_editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' order by s.position`, 'anon') as { position: number; at: number | string; on_day: string | null }[]
     expect(rows[0]).toMatchObject({ on_day: '2026-11-15' })
-    expect(rows[0].at).toMatch(/^2026-11-16 03:51:01/)
+    expect(Number(rows[0].at)).toBe(Date.parse('2026-11-16T03:51:01Z') / 1000)
     expect(rows[1].on_day).toBeNull() // older rows fall back to the UTC day of the instant
   })
 })
