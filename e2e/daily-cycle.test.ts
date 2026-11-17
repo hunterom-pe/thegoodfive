@@ -6,7 +6,7 @@ import type { ClaimVerifier } from '../server/pipeline/verify'
 import { scheduledDraft, scheduledPublish } from '../server/scheduled'
 import { contentHash } from '../server/autopublish'
 import { localDb, postgresAvailable, startPg, type PgInstance } from './localdb'
-import { World } from './world'
+import { World, articles } from './world'
 
 const TODAY = editionToday()
 const YESTERDAY = new Date(Date.parse(`${TODAY}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
@@ -661,5 +661,34 @@ describe.skipIf(!postgresAvailable())('the daily cycle, end to end (isolated dat
     expect(rows[0]).toMatchObject({ on_day: '2026-11-15' })
     expect(Number(rows[0].at)).toBe(Date.parse('2026-11-16T03:51:01Z') / 1000)
     expect(rows[1].on_day).toBeNull() // older rows fall back to the UTC day of the instant
+  })
+
+  // ── what counts as "already ran" ─────────────────────────────────────
+  it('an article turned away from an earlier edition (never shown to readers) may still run today', async () => {
+    // Yesterday's edition, published, also stores every fixture article as a turned-away story, as an editor's lineup does.
+    pg.exec(`insert into public.editions (edition_date, status) values ('${YESTERDAY}', 'draft');`)
+    for (let n = 1; n <= 5; n++)
+      pg.exec(`insert into public.stories (edition_id, role, position, category, headline, summary, source_name, source_url, source_published_at) select id, 'primary', ${n}, 'nature', 'previous story ${n}', 'Summary ${n}', 'BBC News', 'https://www.bbc.co.uk/news/articles/previous-${n}', now() - interval '3 days' from public.editions where edition_date = '${YESTERDAY}';`)
+    for (const a of articles(world.state))
+      pg.exec(`insert into public.stories (edition_id, role, position, category, headline, summary, source_name, source_url, source_published_at, rejected_reason) select id, 'rejected', null, 'nature', 'Turned away', 'S', '${a.site}', '${a.url}', now() - interval '1 day', 'Not chosen' from public.editions where edition_date = '${YESTERDAY}';`)
+    pg.exec(`update public.editions set status = 'published', published_at = now() - interval '1 day' where edition_date = '${YESTERDAY}';`)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('published')
+    expect(JSON.stringify(out?.record.details.rejected ?? [])).not.toMatch(/already ran/)
+  })
+
+  it('an article that did run recently is still refused, by the checks and by the database', async () => {
+    seedPublished(YESTERDAY)
+    await scheduledDraft('schedule', { db })
+    await waitForGeneration()
+    const chosen = storiesOf('primary')[0].source_url
+    // Make yesterday's first story the same article (as superuser: published text is otherwise locked).
+    pg.exec(`alter table public.stories disable trigger user; update public.stories set source_url = '${chosen}' where headline = 'previous story 1'; alter table public.stories enable trigger user;`)
+    const out = await scheduledPublish('schedule', { db })
+    expect(out?.status).toBe('published')
+    expect(JSON.stringify(out?.record.details.rejected)).toMatch(/already ran/)
+    expect(pg.query(`select 1 from public.public_stories s join public.public_editions e on e.id = s.edition_id where e.edition_date = '${TODAY}' and s.source_url = '${chosen}'`, 'anon')).toHaveLength(0)
   })
 })

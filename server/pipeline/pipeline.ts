@@ -42,7 +42,7 @@ export interface PipelineResult {
 /** Cost guard: never send more than this many candidates to the screening call. */
 const SCREEN_LIMIT = 60
 /** Candidates whose full text we fetch and hand to the writing call. */
-const SHORTLIST_SIZE = 14
+const SHORTLIST_SIZE = 20
 /** Below this much source text we can't summarise accurately, so the story is excluded. */
 const MIN_MATERIAL_CHARS = 350
 
@@ -163,7 +163,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   stop()
   const written = await write(ai, shortlist, options.today)
   log(`Writing took ${Math.round((Date.now() - t1) / 1000)}s`)
-  const drafts = assemble(written, shortlist, log, { maxBackups: 5 })
+  const drafts = assemble(written, shortlist, log, { maxBackups: 7 })
   // Deterministic fact-checking against the retrieved source text. Failures are rejected, never scored.
   const gated = applyGates(drafts, { now: new Date(now), recentUrls: new Set((options.recentUrls ?? []).map(normalizeUrl)), trustedDomains: trustedDomains(options.extraTrustedDomains) })
   stats.accepted = gated.accepted

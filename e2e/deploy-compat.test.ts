@@ -14,6 +14,8 @@ import { localDb, postgresAvailable, startPg, type PgInstance } from './localdb'
  * a version-1 fingerprint with no version field. "New code" is this repository's real publisher.
  */
 const V2_MIGRATION = '20261118000000_fingerprint_v2.sql'
+/** Later migrations that redefine the publish function on top of version 2 belong to the migrated database only. */
+const BUILT_ON_V2 = ['20261122000000_already_ran_means_published.sql']
 
 interface Row {
   id: string
@@ -74,7 +76,7 @@ describeIf('deployment compatibility (fingerprint v2)', () => {
   }
 
   it('old code + old database: publishes', async () => {
-    pg = startPg({ skipMigrations: [V2_MIGRATION] })
+    pg = startPg({ skipMigrations: [V2_MIGRATION, ...BUILT_ON_V2] })
     expect(await oldCode(pg)).toMatchObject({ data: 'published', error: null })
     expect(status(pg)).toBe('published')
   })
@@ -93,7 +95,7 @@ describeIf('deployment compatibility (fingerprint v2)', () => {
   })
 
   it('new code + old database: EXPECTED FAILURE. Nothing publishes, the run says why, the draft is untouched', async () => {
-    pg = startPg({ skipMigrations: [V2_MIGRATION] })
+    pg = startPg({ skipMigrations: [V2_MIGRATION, ...BUILT_ON_V2] })
     const out = await newCode(pg)
     expect(out.status).toBe('skipped')
     expect(out.reason).toMatch(/edited after it was checked/)

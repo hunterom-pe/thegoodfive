@@ -1,5 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { openAiClient } from './pipeline/ai.ts'
+import { evaluateStory } from './pipeline/gates.ts'
+import { trustedDomains } from './pipeline/sources.ts'
+import { aiStoryReviser, type StoryReviser } from './pipeline/revise.ts'
 import { runPipeline } from './pipeline/pipeline.ts'
 import { trackedNotifier, webhookNotifier } from './alerts.ts'
 import { aiConfig } from './pipeline/gemini.ts'
@@ -105,7 +108,7 @@ async function finish(db: SupabaseClient, runId: string, status: 'succeeded' | '
 }
 
 /** Run the whole pipeline and store the result as an unpublished draft. Never throws; the outcome is recorded on the run. */
-export async function executeRun(db: SupabaseClient, runId: string, date: string, log: (line: string) => void = console.log, deps: { verify?: ClaimVerifier } = {}): Promise<void> {
+export async function executeRun(db: SupabaseClient, runId: string, date: string, log: (line: string) => void = console.log, deps: { verify?: ClaimVerifier; revise?: StoryReviser } = {}): Promise<void> {
   const stats: Record<string, unknown> = {}
   const c0 = env()
   // Alerts that cannot be delivered are remembered and stored with the run, so nobody has to guess whether they were told.
@@ -150,7 +153,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
     await untilAborted(job.signal, recordLibraryUse(db, editionId as string, date, result.stories, log)).catch((e) => log(`Photo use not recorded: ${e instanceof Error ? e.message : e}`))
     // Check every story's claims now, while there is time, so 7:00 AM does not depend on the AI being quick then.
     const claimBudget = Math.min(CLAIM_CHECK_BUDGET_MS, limit - Date.now())
-    Object.assign(stats, { claimChecks: await storeDraftClaimChecks(db, date, deps.verify ?? draftClaimVerifier(), log, { gapMs: env().claimCheckGapMs, budgetMs: claimBudget, signal: job.signal }) })
+    Object.assign(stats, { claimChecks: await storeDraftClaimChecks(db, date, deps.verify ?? draftClaimVerifier(), log, { gapMs: env().claimCheckGapMs, budgetMs: claimBudget, signal: job.signal, revise: deps.revise ?? draftReviser(), trustedDomains: trustedDomains(c.extraTrusted) }) })
     // Photos are expected every day: say so loudly when a story will run without one.
     const bare = result.stories.filter((s) => s.role === 'primary' && !s.image_rights_confirmed).length
     if (bare > 0) await tracked.notify(`The draft for ${date} has ${bare} of 5 stories without an approved photo (they will show artwork). Add photos in the editor, or save more to the photo library.`)
@@ -168,7 +171,7 @@ export async function executeRun(db: SupabaseClient, runId: string, date: string
 /** Time kept back from the whole-job limit for recording the outcome and sending the alert. */
 export const FINISH_RESERVE_MS = 60_000
 /** The most the draft-time claim checks may take, whatever time is left. */
-const CLAIM_CHECK_BUDGET_MS = 4 * 60_000
+const CLAIM_CHECK_BUDGET_MS = 7 * 60_000
 
 /** Settle with the work, or reject as soon as the signal fires (the work is left to be cancelled by its own signal). */
 function untilAborted<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
@@ -245,6 +248,8 @@ export function supabasePublishStore(db: SupabaseClient): PublishStore {
       const { data, error } = await db
         .from('stories')
         .select('source_url, editions!inner(edition_date, status)')
+        // What readers saw: the five primaries. Backups and turned-away stories never appeared, so they may run later.
+        .eq('role', 'primary')
         .eq('editions.status', 'published')
         .gte('editions.edition_date', since)
         .lt('editions.edition_date', date)
@@ -325,24 +330,28 @@ export function parseStoredCheck(raw: unknown): StoredClaimCheck | null {
  * of the text it read, for the 7:00 AM publisher to reuse. Slow and patient on purpose (a few at a time, generous
  * timeouts and retries). Never throws and never blocks the draft: a failure only means 7:00 AM checks that story.
  */
-export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number; budgetMs?: number; signal?: AbortSignal } = {}): Promise<{ checked: number; stored: number }> {
-  if (!verify) return { checked: 0, stored: 0 }
+export async function storeDraftClaimChecks(db: SupabaseClient, date: string, verify: ClaimVerifier | undefined, log: (line: string) => void = () => {}, options: { gapMs?: number; budgetMs?: number; signal?: AbortSignal; revise?: StoryReviser; trustedDomains?: string[] } = {}): Promise<{ checked: number; stored: number; revised: number }> {
+  if (!verify) return { checked: 0, stored: 0, revised: 0 }
   if (options.budgetMs !== undefined && options.budgetMs <= 0) {
     log('Claim checks skipped: no time left in this run. They will be made at publish time.')
-    return { checked: 0, stored: 0 }
+    return { checked: 0, stored: 0, revised: 0 }
   }
   let edition: StoredEdition | null = null
   try {
     edition = await supabasePublishStore(db).loadEdition(date)
   } catch (e) {
     log(`Claim checks skipped: ${e instanceof Error ? e.message : e}`)
-    return { checked: 0, stored: 0 }
+    return { checked: 0, stored: 0, revised: 0 }
   }
-  if (!edition || edition.status === 'published') return { checked: 0, stored: 0 }
-  const candidates = edition.stories.filter((s) => s.role !== 'rejected')
+  if (!edition || edition.status === 'published') return { checked: 0, stored: 0, revised: 0 }
+  // The five first, then the backups in order: if time runs short, the stories most likely to run are covered.
+  const candidates = edition.stories
+    .filter((s) => s.role !== 'rejected')
+    .sort((a, b) => (a.role === b.role ? (a.position ?? 99) - (b.position ?? 99) : a.role === 'primary' ? -1 : 1))
   let stored = 0
+  let revised = 0
   // One at a time, a few seconds apart: the free Gemini tier allows 15 requests a minute, and the draft run has
-  // already used two. Eight stories take well under a minute, inside the background function's 15 minutes.
+  // already used two. Twelve stories (plus a few rewrites) take a few minutes, inside the background function's 15 minutes.
   const gap = options.gapMs ?? 4_500
   // An overall limit, so a struggling AI provider can never keep the background function running until the
   // platform kills it (it has 15 minutes in all, and the pipeline has already used some). Unchecked stories are
@@ -358,14 +367,57 @@ export async function storeDraftClaimChecks(db: SupabaseClient, date: string, ve
     const v = await untilAborted(deadline.signal, Promise.resolve(verify({ headline: s.headline, summary: s.summary, material: s.sourceMaterial ?? '' }, deadline.signal))).catch((e): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [String(e).slice(0, 160)] }))
     // A check cut off by the time limit says nothing about the story: store nothing, so it is checked at 7:00 AM.
     if (deadline.signal.aborted) return
-    const record: StoredClaimCheck = { ...v, hash: contentHash(s), checkedAt: new Date().toISOString() }
-    const { error } = await db.from('stories').update({ claim_check: record }).eq('id', s.id)
+    const fixed = v.verdict !== 'verified' && !v.unavailable && options.revise ? await reviseAndRecheck(s, v, verify, options.revise, deadline.signal, gap, log, options.trustedDomains) : null
+    if (deadline.signal.aborted && !fixed) return
+    const update = fixed
+      ? { headline: fixed.story.headline, summary: fixed.story.summary, claim_check: { ...fixed.v, hash: contentHash(fixed.story), checkedAt: new Date().toISOString(), revisedFrom: { headline: s.headline, summary: s.summary } } }
+      : { claim_check: { ...v, hash: contentHash(s), checkedAt: new Date().toISOString() } satisfies StoredClaimCheck }
+    const { error } = await db.from('stories').update(update).eq('id', s.id)
     if (error) log(`Could not store the claim check for "${s.headline.slice(0, 40)}": ${error.message}`)
-    else stored++
+    else {
+      stored++
+      if (fixed) revised++
+    }
   })
   clearTimeout(timer)
-  log(`Claim checks stored for ${stored} of ${candidates.length} stories${deadline.signal.aborted ? ' (stopped at the time limit)' : ''}`)
-  return { checked: candidates.length, stored }
+  log(`Claim checks stored for ${stored} of ${candidates.length} stories, ${revised} after rewriting unconfirmed wording${deadline.signal.aborted ? ' (stopped at the time limit)' : ''}`)
+  return { checked: candidates.length, stored, revised }
+}
+
+/**
+ * Rewrite the parts of a story the check could not confirm, from its own source, then put the rewrite through the
+ * same deterministic gates and the same claim check from scratch. Returns the rewrite only if it is VERIFIED;
+ * otherwise null, and the original text and its verdict are kept (the 7:00 AM publisher then turns it away).
+ */
+async function reviseAndRecheck(s: StoredStory, first: Verification, verify: ClaimVerifier, revise: StoryReviser, signal: AbortSignal, gap: number, log: (line: string) => void, domains?: string[]): Promise<{ story: StoredStory; v: Verification } | null> {
+  const material = s.sourceMaterial ?? ''
+  const wait = () => (gap > 0 ? untilAborted(signal, new Promise((r) => setTimeout(r, gap))).catch(() => {}) : Promise.resolve())
+  await wait()
+  if (signal.aborted) return null
+  const r = await untilAborted(signal, revise({ headline: s.headline, summary: s.summary, material, issues: first.issues }, signal)).catch(() => null)
+  if (!r || signal.aborted) return null
+  const story: StoredStory = { ...s, headline: r.headline, summary: r.summary }
+  const gate = evaluateStory({ headline: story.headline, summary: story.summary, category: story.category, sourceName: story.sourceName, sourceUrl: story.sourceUrl, sourcePublishedAt: story.sourcePublishedAt, sourceMaterial: story.sourceMaterial, aiRationale: story.aiRationale }, { now: new Date(), recentUrls: new Set(), trustedDomains: domains })
+  if (!gate.ok) {
+    log(`Rewrite of "${s.headline.slice(0, 40)}" failed the checks (${gate.failures.map((f) => f.code).join(', ')}); keeping the original.`)
+    return null
+  }
+  await wait()
+  if (signal.aborted) return null
+  const v = await untilAborted(signal, Promise.resolve(verify({ headline: story.headline, summary: story.summary, material }, signal))).catch((): Verification => ({ verdict: 'inconclusive', unavailable: true, issues: [] }))
+  if (signal.aborted || v.verdict !== 'verified') {
+    if (!signal.aborted) log(`Rewrite of "${s.headline.slice(0, 40)}" still not confirmed; keeping the original.`)
+    return null
+  }
+  log(`Rewrote unconfirmed wording in "${s.headline.slice(0, 40)}" and confirmed the new text.`)
+  return { story, v }
+}
+
+/** The draft run's reviser: same model and patience as its claim check. */
+export function draftReviser(): StoryReviser | undefined {
+  const c = env()
+  if (!c.aiKey) return undefined
+  return aiStoryReviser(openAiClient(c.aiKey, c.model, c.aiBaseUrl, { keySource: c.aiKeySource, reasoningEffort: c.reasoningEffort, timeoutSeconds: 60, retryDelaysMs: c.aiRetryDelays.length ? c.aiRetryDelays : [5_000, 20_000] }))
 }
 
 /** The verifier for the draft run: no 30-second ceiling here, so it waits longer and retries more before giving up. */

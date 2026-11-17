@@ -102,6 +102,15 @@ function fakeModel(body: { messages: { role: string; content: string }[]; respon
   const user = body.messages.find((m) => m.role === 'user')?.content ?? ''
   const name = body.response_format?.json_schema?.name
   if (name === 'claim_check') return fakeClaimCheck(user, claimCheck)
+  if (name === 'story_revision') {
+    // An honest rewrite: the article's own sentences, about as long as the summary was.
+    const headline = /HEADLINE:\n(.*)\n/.exec(user)?.[1] ?? ''
+    const before = /SUMMARY:\n([\s\S]*?)\n\nARTICLE TEXT:/.exec(user)?.[1] ?? ''
+    const sentences = user.slice(user.indexOf('ARTICLE TEXT:') + 13).trim().split(/(?<=[.!?])\s+/)
+    let summary = ''
+    for (const x of sentences) if (summary.length < before.length * 0.7) summary = `${summary} ${x}`.trim()
+    return { headline, summary }
+  }
   const list = JSON.parse(user.slice(user.indexOf('[')))
   if (name === 'screening') {
     return {
